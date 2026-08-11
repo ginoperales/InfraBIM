@@ -10,6 +10,8 @@ Firestore y Google Drive API.
 - Firebase Auth con Google provider
 - Firestore para usuarios, objetos BIM, favoritos y registros de Drive
 - Google Drive API como almacenamiento de fichas/archivos BIM
+- Cloudflare Workers Free como backend seguro de Mercado Pago
+- Mercado Pago para suscripciones con tarjeta y pagos Yape dentro de InfraBIM
 
 ## Configuracion
 
@@ -22,6 +24,41 @@ Firestore y Google Drive API.
 5. En Google Cloud habilita Google Drive API para el mismo proyecto.
 6. Agrega tus dominios autorizados en Firebase Auth y en el cliente OAuth de
    Google.
+7. En Mercado Pago Developers copia tu Public Key de Peru en
+   `VITE_MERCADO_PAGO_PUBLIC_KEY`.
+8. Cuando despliegues el Worker, coloca su URL en `VITE_PAYMENTS_API_URL`.
+
+## Pagos con Cloudflare Workers
+
+El Access Token de Mercado Pago nunca va en React. Guardalo como secreto del
+Worker:
+
+```bash
+npx wrangler login
+npm run worker:secret:mp
+```
+
+Para que el Worker escriba pagos y suscripciones en Firestore, crea una service
+account de Firebase y guardala como secreto JSON:
+
+```bash
+npm run worker:secret:firebase
+```
+
+Despliegue del Worker:
+
+```bash
+npm run worker:deploy
+```
+
+Despues del deploy, copia la URL `workers.dev` en `.env.local`:
+
+```bash
+VITE_PAYMENTS_API_URL=https://infrabim-payments.<tu-subdominio>.workers.dev
+```
+
+Nunca coloques `MERCADO_PAGO_ACCESS_TOKEN` ni `FIREBASE_SERVICE_ACCOUNT` en
+`.env.local`; solo deben estar en Cloudflare Secrets.
 
 ## Comandos
 
@@ -35,10 +72,16 @@ npm run deploy
 
 ## Deploy
 
-El deploy usa:
+Hosting y reglas:
 
 ```bash
 firebase deploy --only hosting,firestore:rules
+```
+
+Funciones de pago:
+
+```bash
+npm run worker:deploy
 ```
 
 El proyecto Firebase configurado por defecto es `infrabimss` en `.firebaserc`.

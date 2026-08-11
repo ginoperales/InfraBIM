@@ -13,10 +13,15 @@
     "lint": "eslint src --max-warnings=0",
     "firebase:login": "firebase login",
     "firebase:emulators": "firebase emulators:start --only hosting,auth,firestore",
+    "worker:dev": "npx wrangler dev --config worker/wrangler.toml",
+    "worker:deploy": "npx wrangler deploy --config worker/wrangler.toml",
+    "worker:secret:mp": "npx wrangler secret put MERCADO_PAGO_ACCESS_TOKEN --config worker/wrangler.toml",
+    "worker:secret:firebase": "npx wrangler secret put FIREBASE_SERVICE_ACCOUNT --config worker/wrangler.toml",
     "deploy": "firebase deploy --only hosting,firestore:rules"
   },
   "dependencies": {
     "firebase": "^12.17.1",
+    "lucide-react": "^1.31.0",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },

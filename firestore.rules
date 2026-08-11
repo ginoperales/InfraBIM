@@ -14,8 +14,30 @@ service cloud.firestore {
       return signedIn() && request.auth.token.email_verified == true;
     }
 
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/system/accessControl)
+        && get(/databases/$(database)/documents/system/accessControl).data.ownerUid == request.auth.uid;
+    }
+
+    match /system/accessControl {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && !exists(/databases/$(database)/documents/system/accessControl);
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /system/paymentPlans {
+      allow read: if true;
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
     match /users/{uid} {
-      allow read, create, update: if isOwner(uid);
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid) || isAdmin();
       allow delete: if false;
 
       match /favorites/{favoriteId} {
@@ -25,29 +47,50 @@ service cloud.firestore {
 
     match /bimObjects/{objectId} {
       allow read: if true;
-      allow create, update: if isVerified();
-      allow delete: if false;
+      allow create, update: if isVerified() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /catalogItems/{itemId} {
+      allow read: if true;
+      allow create, update: if isVerified() || isAdmin();
+      allow delete: if isAdmin();
     }
 
     match /manufacturers/{manufacturerId} {
       allow read: if true;
-      allow create, update: if isVerified();
-      allow delete: if false;
+      allow create, update: if isVerified() || isAdmin();
+      allow delete: if isAdmin();
     }
 
     match /driveFiles/{fileId} {
-      allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow read: if isAdmin() || (signedIn() && resource.data.ownerUid == request.auth.uid);
       allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if signedIn()
+      allow update: if isAdmin() || (signedIn()
         && resource.data.ownerUid == request.auth.uid
-        && request.resource.data.ownerUid == request.auth.uid;
-      allow delete: if false;
+        && request.resource.data.ownerUid == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.ownerUid == request.auth.uid);
+      allow write: if false;
+    }
+
+    match /subscriptions/{subscriptionId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.ownerUid == request.auth.uid);
+      allow write: if false;
+    }
+
+    match /paymentWebhookEvents/{eventId} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     match /projects/{projectId} {
-      allow read, update: if signedIn() && request.auth.uid in resource.data.memberIds;
-      allow create: if signedIn() && request.auth.uid in request.resource.data.memberIds;
-      allow delete: if false;
+      allow read, update: if isAdmin() || (signedIn() && request.auth.uid in resource.data.memberIds);
+      allow create: if isAdmin() || (signedIn() && request.auth.uid in request.resource.data.memberIds);
+      allow delete: if isAdmin();
     }
   }
 }
