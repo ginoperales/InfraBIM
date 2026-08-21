@@ -202,6 +202,7 @@ type CatalogDraft = {
 };
 
 type CheckoutMethod = "card" | "yape";
+type Language = "ES" | "EN";
 
 export interface BulkFolderProgressItem {
   id: string;
@@ -646,6 +647,286 @@ const footerGroups = [
   ["Soporte", "Centro de ayuda", "Terminos de uso", "Privacidad", "Politica de cookies"],
 ];
 
+
+const uiCopy: Record<Language, {
+  catalogMeta: Record<CatalogKind, { label: string; singular: string; description: string }>;
+  navigation: Array<{ label: string; path: string }>;
+  moreMenuColumns: Array<{ title: string; links: string[] }>;
+  categories: Array<{ label: string; filter: string; Icon: LucideIcon }>;
+  heroSlides: Array<{ eyebrow: string; title: string; description: string }>;
+  footerGroups: string[][];
+  header: {
+    plans: string;
+    admin: string;
+    notifications: string;
+    noNotifications: string;
+    accountMenu: string;
+    editProfile: string;
+    faq: string;
+    logout: string;
+    login: string;
+    lightMode: string;
+    darkMode: string;
+    languageName: string;
+  };
+  moreMenu: { trigger: string; title: string; detail: string };
+  home: {
+    pluginNav: string;
+    heroDots: string;
+    heroDot: string;
+    searchAria: string;
+    searchPlaceholder: string;
+    searchButton: string;
+    commonSearches: string;
+    popularTitle: string;
+    popularDescription: string;
+    detailButton: string;
+    download: string;
+    catalogEmptyTitle: string;
+    catalogEmptyText: string;
+    manufacturersTitle: string;
+    manufacturersDescription: string;
+    makerProductsSingular: string;
+    makerProductsPlural: string;
+    makerEmpty: string;
+    materialsTitle: string;
+    materialsDescription: string;
+    materialsButton: string;
+    materialCards: Array<{ name: string; detail: string; visual: string; Icon: LucideIcon }>;
+    collectionsTitle: string;
+    collectionsDescription: string;
+    collectionsButton: string;
+    collectionReal: string;
+    collectionsEmptyTitle: string;
+    collectionsEmptyText: string;
+    projectsTitle: string;
+    projectsDescription: string;
+    projectsButton: string;
+    projectFallback: string;
+    published: string;
+    projectsEmptyTitle: string;
+    projectsEmptyText: string;
+  };
+  pluginHome: {
+    eyebrow: string;
+    title: string;
+    description: string;
+    installerAria: string;
+    compatibility: string;
+    userInstall: string;
+    webview: string;
+    functions: string;
+    downloadZip: string;
+    imageAlt: string;
+  };
+  pluginPage: {
+    eyebrow: string;
+    title: string;
+    description: string;
+    downloadUser: string;
+    downloadGuest: string;
+    compatibleCatalog: string;
+    metaAria: string;
+    compatibility: string;
+    userInstall: string;
+    previewAlt: string;
+    panelTitle: string;
+    panelStrong: string;
+    panelSmall: string;
+    galleryAria: string;
+    interfaceAlt: string;
+    interfaceCaption: string;
+    insertAlt: string;
+    insertCaption: string;
+    featuresAria: string;
+    features: Array<{ title: string; text: string }>;
+    downloadTitle: string;
+    downloadText: string;
+    downloadButton: string;
+  };
+  plans: {
+    eyebrow: string;
+    title: string;
+    description: string;
+    unavailableTitle: string;
+    unavailableText: string;
+    benefits: string;
+    freeTitle: string;
+    freeDescription: string;
+    freeBenefits: string[];
+    paidBenefits: string[];
+    viewPlugin: string;
+    popular: string;
+    userMonth: string;
+    subscribe: string;
+    yape: string;
+    studentNote: string;
+    plansAria: string;
+    checkoutReady: string;
+  };
+  footer: { copyright: string; themeAria: string };
+  support: { title: string; openPanel: string; connectGoogle: string; viewPlugin: string; chatAria: string };
+  topStrip: { users: string; companies: string };
+}> = {
+  ES: {
+    catalogMeta: {
+      familias: { label: "Familias", singular: "Familia", description: "Objetos BIM parametrizados para Revit, IFC y flujos OpenBIM." },
+      materiales: { label: "Materiales", singular: "Material", description: "Acabados, superficies y fichas tecnicas enlazadas." },
+      colecciones: { label: "Colecciones", singular: "Coleccion", description: "Paquetes de recursos por ambiente, sistema o tipo de proyecto." },
+      marcas: { label: "Marcas", singular: "Marca", description: "Fabricantes con catalogo BIM, productos y analitica comercial." },
+      proyectos: { label: "Proyectos", singular: "Proyecto", description: "Expedientes BIM con modelos, documentos y objetos vinculados." },
+      galeria: { label: "Galeria", singular: "Galeria", description: "Escenas, renders, previsualizaciones y casos de uso." },
+    },
+    navigation: [
+      { label: "Familias", path: "/familias" },
+      { label: "Materiales", path: "/materiales" },
+      { label: "Colecciones", path: "/colecciones" },
+      { label: "Marcas", path: "/marcas" },
+      { label: "Proyectos", path: "/proyectos" },
+      { label: "Galeria", path: "/galeria" },
+    ],
+    moreMenuColumns: [
+      { title: "Acerca de", links: ["Sobre Nosotros", "Blog", "FAQ", "Que hay de nuevo", "Lo que viene"] },
+      { title: "Fabricantes", links: ["Para Fabricantes", "Desarrollo Estrategico", "Publicacion Dirigida", "Marketing Personalizado", "Planes", "Preguntas Frecuentes"] },
+      { title: "Afiliados", links: ["Para Afiliados", "Materiales Promocionales", "Politica de Promocion", "FAQ"] },
+      { title: "Terminos y politicas", links: ["Terminos de uso", "Politica de privacidad", "Politica de Cookies"] },
+    ],
+    categories: [
+      { label: "Mobiliario", filter: "Arquitectura", Icon: Armchair },
+      { label: "Puertas", filter: "Puertas", Icon: DoorOpen },
+      { label: "Ventanas", filter: "Ventanas", Icon: PanelsTopLeft },
+      { label: "Sanitarios", filter: "Sanitarios", Icon: Bath },
+      { label: "Iluminacion", filter: "Iluminacion", Icon: Lamp },
+      { label: "HVAC", filter: "HVAC", Icon: Fan },
+      { label: "Cocinas", filter: "Cocinas", Icon: CookingPot },
+      { label: "Estructuras", filter: "Estructuras", Icon: Building2 },
+      { label: "Exterior", filter: "Exterior", Icon: Trees },
+    ],
+    heroSlides: [
+      { eyebrow: "Biblioteca BIM para Latinoamerica", title: "Dale vida a tus proyectos con familias BIM listas para Revit.", description: "Busca, guarda, publica y descarga objetos con metadatos tecnicos, visor 3D y respaldo seguro para tus equipos." },
+      { eyebrow: "Recursos en multiples formatos", title: "Encuentra RFA, RVT, IFC, DWG, PDF, ZIP y contenido OpenBIM.", description: "Filtra por disciplina, fabricante, licencia o version de Revit para llegar mas rapido al archivo correcto." },
+      { eyebrow: "Plugin InfraBIM para Revit", title: "Descarga desde la web o inserta familias directo en tu modelo.", description: "El plugin conecta tu sesion con el catalogo y recursos protegidos para trabajar sin salir de Revit." },
+      { eyebrow: "Biblioteca viva y ordenada", title: "Organiza colecciones, materiales y proyectos reales en un solo hub.", description: "Cada publicacion puede incluir miniaturas, archivos adjuntos, colecciones y contador real de descargas." },
+    ],
+    footerGroups: [
+      ["InfraBIM", "Inicio", "Plugin Revit", "Planes", "Familias", "Materiales", "Colecciones"],
+      ["Comunidad", "Aprende BIM", "Foro", "Cursos", "Galeria", "Proyectos"],
+      ["Fabricantes", "Para fabricantes", "Marketing BIM", "Analitica", "Publicar producto", "Planes"],
+      ["Soporte", "Centro de ayuda", "Terminos de uso", "Privacidad", "Politica de cookies"],
+    ],
+    header: { plans: "Planes", admin: "Admin", notifications: "Notificaciones", noNotifications: "Sin notificaciones", accountMenu: "Abrir menu de cuenta", editProfile: "Editar Perfil", faq: "Preguntas Frecuentes", logout: "Salir", login: "Iniciar Sesion", lightMode: "Modo Claro", darkMode: "Modo Oscuro", languageName: "Espanol" },
+    moreMenu: { trigger: "Mas...", title: "Biblioteca BIM para Revit", detail: "Formatos RFA, IFC, DWG y colecciones listas para descargar." },
+    home: {
+      pluginNav: "Plugin para Revit", heroDots: "Mensajes destacados InfraBIM", heroDot: "Ver mensaje: ", searchAria: "Busqueda principal", searchPlaceholder: "Puerta cortafuego 90 cm para hospital", searchButton: "Buscar familias", commonSearches: "Busquedas comunes:",
+      popularTitle: "Populares", popularDescription: "Familias Revit mejor valoradas por usuarios de InfraBIM.", detailButton: "Ver detalle ->", download: "Descargar", catalogEmptyTitle: "Catalogo sin publicaciones", catalogEmptyText: "Cuando publiques recursos apareceran aqui.",
+      manufacturersTitle: "Fabricantes", manufacturersDescription: "Marcas con catalogos BIM, fichas tecnicas y analitica comercial.", makerProductsSingular: "producto", makerProductsPlural: "productos", makerEmpty: "Publica recursos reales con el campo fabricante para activar estos filtros.",
+      materialsTitle: "Materiales", materialsDescription: "Acabados, fichas tecnicas y parametros listos para presupuestos.", materialsButton: "Ver materiales", materialCards: [
+        { name: "Concreto aparente", detail: "Textura mineral para muros, losas y elementos vistos.", visual: "concrete", Icon: Building2 },
+        { name: "Melamina nogal", detail: "Acabado madera para mobiliario y carpinteria BIM.", visual: "wood", Icon: Trees },
+        { name: "Vidrio templado", detail: "Superficie transparente para mamparas, puertas y fachadas.", visual: "glass", Icon: PanelsTopLeft },
+        { name: "Acero galvanizado", detail: "Metal protegido para estructuras, barandas y soportes.", visual: "steel", Icon: Wrench },
+      ],
+      collectionsTitle: "Colecciones", collectionsDescription: "Paquetes completos publicados desde la base real de InfraBIM.", collectionsButton: "Ver colecciones", collectionReal: "Coleccion real", collectionsEmptyTitle: "Sin colecciones reales publicadas", collectionsEmptyText: "Cuando publiques paquetes con tipo Coleccion desde el panel, apareceran aqui.",
+      projectsTitle: "Proyectos", projectsDescription: "Expedientes BIM publicados desde la base real de InfraBIM.", projectsButton: "Ver proyectos", projectFallback: "Proyecto BIM", published: "Publicado en InfraBIM", projectsEmptyTitle: "Sin proyectos reales publicados", projectsEmptyText: "Cuando publiques expedientes con tipo Proyecto desde el panel, apareceran aqui.",
+    },
+    pluginHome: { eyebrow: "Plugin para Revit", title: "Inserta familias BIM con un clic desde tu flujo de trabajo.", description: "Instalador con identidad InfraBIM, WebView2 integrado y acceso directo al catalogo desde Revit.", installerAria: "Instalador InfraBIM", compatibility: "Revit 2024 - 2026", userInstall: "Instalacion por usuario", webview: "WebView2 incluido", functions: "Ver funciones", downloadZip: "Descargar ZIP", imageAlt: "Render del plugin InfraBIM operando dentro de Revit con catalogo BIM y modelo 3D" },
+    pluginPage: {
+      eyebrow: "Plugin exclusivo InfraBIM", title: "Instala InfraBIM para Revit y trabaja el catalogo desde tu modelo.", description: "Descarga el instalador ZIP, inicia sesion con tu cuenta InfraBIM y conecta Revit con familias, materiales, colecciones y archivos tecnicos publicados en la plataforma.", downloadUser: "Descargar ZIP del instalador", downloadGuest: "Iniciar sesion y descargar ZIP", compatibleCatalog: "Ver catalogo compatible", metaAria: "Compatibilidad del instalador", compatibility: "Revit 2024 - 2026", userInstall: "Instalacion por usuario", previewAlt: "Render del plugin InfraBIM operando dentro de Revit con catalogo BIM y modelo 3D", panelTitle: "InfraBIM Plugin", panelStrong: "Buscar. Previsualizar. Cargar.", panelSmall: "Biblioteca BIM conectada a tu cuenta.", galleryAria: "Renders del flujo de trabajo del plugin InfraBIM", interfaceAlt: "Render de la interfaz de busqueda y categorias del plugin InfraBIM en Revit", interfaceCaption: "Buscar familias desde Revit", insertAlt: "Render de una familia BIM insertada desde InfraBIM en un modelo de Revit", insertCaption: "Previsualizar e insertar en el modelo", featuresAria: "Funciones del plugin InfraBIM",
+      features: [
+        { title: "Instalacion guiada", text: "El instalador copia el add-in en Revit 2024, 2025 y 2026 sin configurar carpetas manualmente." },
+        { title: "Descarga protegida", text: "Toda descarga valida sesion InfraBIM y conserva el acceso seguro a archivos, ZIP y carpetas vinculadas." },
+        { title: "Insertar familias", text: "Carga familias compatibles y abre recursos del catalogo para acelerar documentacion y coordinacion." },
+        { title: "Favoritos y biblioteca", text: "Guarda elementos frecuentes para reutilizarlos en proyectos, equipos y entregables recurrentes." },
+        { title: "Vista 3D y AR", text: "Revisa modelos GLB, previews y metadatos tecnicos antes de llevarlos al proyecto." },
+        { title: "Roles y permisos", text: "Funciona con el control de acceso de InfraBIM para equipos, fabricantes y administradores." },
+      ],
+      downloadTitle: "Descarga segura del instalador", downloadText: "El boton valida sesion antes de iniciar la descarga. Si no has ingresado, primero se abrira Google Auth.", downloadButton: "Descargar instalador ZIP",
+    },
+    plans: { eyebrow: "Planes InfraBIM", title: "Los mejores proyectos empiezan aqui", description: "Todo lo que necesitas, directamente en Revit y en tu biblioteca InfraBIM.", unavailableTitle: "Precios no disponibles", unavailableText: "No se pudieron cargar los precios reales desde Firestore.", benefits: "Beneficios:", freeTitle: "Gratis", freeDescription: "Para explorar el catalogo y probar el flujo BIM.", freeBenefits: ["Plugin para Revit", "Acceso limitado a familias gratuitas de InfraBIM", "Productos de fabricantes nacionales e internacionales", "Materiales con texturas listas para renderizar"], paidBenefits: ["Plugin para Revit", "Mas de 9,000 familias disponibles al instante", "25 familias nuevas cada semana, hasta 1,300 al ano + colecciones extra", "Productos de fabricantes nacionales e internacionales", "Materiales con texturas listas para renderizar", "Sugerencias inteligentes de elementos relacionados", "Equipos con permisos modulares por rol"], viewPlugin: "Ver plugin", popular: "Popular", userMonth: "Usuario/Mes", subscribe: "Suscribirme", yape: "Pagar con Yape", studentNote: "Descuento para estudiantes. Sera necesario acreditar la elegibilidad.", plansAria: "Planes disponibles", checkoutReady: "Checkout listo." },
+    footer: { copyright: "InfraBIM Copyright 2026. Todos los derechos reservados.", themeAria: "Cambiar tema" },
+    support: { title: "Soporte InfraBIM", openPanel: "Abrir panel", connectGoogle: "Conectar Google", viewPlugin: "Ver plugin", chatAria: "Abrir soporte" },
+    topStrip: { users: "Desbloquea tu flujo BIM: 9000+ familias en un solo lugar. Ver planes ->", companies: "Para Empresas: impulsa tus productos ->" },
+  },
+  EN: {
+    catalogMeta: {
+      familias: { label: "Families", singular: "Family", description: "Parametric BIM objects for Revit, IFC, and OpenBIM workflows." },
+      materiales: { label: "Materials", singular: "Material", description: "Finishes, surfaces, and linked technical sheets." },
+      colecciones: { label: "Collections", singular: "Collection", description: "Resource bundles by room, system, or project type." },
+      marcas: { label: "Brands", singular: "Brand", description: "Manufacturers with BIM catalogs, products, and commercial analytics." },
+      proyectos: { label: "Projects", singular: "Project", description: "BIM packages with models, documents, and linked objects." },
+      galeria: { label: "Gallery", singular: "Gallery", description: "Scenes, renders, previews, and use cases." },
+    },
+    navigation: [
+      { label: "Families", path: "/familias" },
+      { label: "Materials", path: "/materiales" },
+      { label: "Collections", path: "/colecciones" },
+      { label: "Brands", path: "/marcas" },
+      { label: "Projects", path: "/proyectos" },
+      { label: "Gallery", path: "/galeria" },
+    ],
+    moreMenuColumns: [
+      { title: "About", links: ["About Us", "Blog", "FAQ", "What is new", "Coming next"] },
+      { title: "Manufacturers", links: ["For Manufacturers", "Strategic Development", "Directed Publishing", "Personalized Marketing", "Plans", "Frequently Asked Questions"] },
+      { title: "Affiliates", links: ["For Affiliates", "Promotional Materials", "Promotion Policy", "FAQ"] },
+      { title: "Terms and policies", links: ["Terms of use", "Privacy policy", "Cookie policy"] },
+    ],
+    categories: [
+      { label: "Furniture", filter: "Arquitectura", Icon: Armchair },
+      { label: "Doors", filter: "Puertas", Icon: DoorOpen },
+      { label: "Windows", filter: "Ventanas", Icon: PanelsTopLeft },
+      { label: "Plumbing", filter: "Sanitarios", Icon: Bath },
+      { label: "Lighting", filter: "Iluminacion", Icon: Lamp },
+      { label: "HVAC", filter: "HVAC", Icon: Fan },
+      { label: "Kitchens", filter: "Cocinas", Icon: CookingPot },
+      { label: "Structures", filter: "Estructuras", Icon: Building2 },
+      { label: "Exterior", filter: "Exterior", Icon: Trees },
+    ],
+    heroSlides: [
+      { eyebrow: "BIM library for Latin America", title: "Bring projects to life with Revit-ready BIM families.", description: "Search, save, publish, and download objects with technical metadata, 3D preview, and secure team access." },
+      { eyebrow: "Resources in multiple formats", title: "Find RFA, RVT, IFC, DWG, PDF, ZIP, and OpenBIM content.", description: "Filter by discipline, manufacturer, license, or Revit version to reach the right file faster." },
+      { eyebrow: "InfraBIM plugin for Revit", title: "Download from the web or insert families directly into your model.", description: "The plugin connects your session to the catalog and protected resources without leaving Revit." },
+      { eyebrow: "A live, organized library", title: "Organize collections, materials, and real projects in one hub.", description: "Each publication can include thumbnails, attachments, collections, and real download metrics." },
+    ],
+    footerGroups: [
+      ["InfraBIM", "Home", "Revit Plugin", "Plans", "Families", "Materials", "Collections"],
+      ["Community", "Learn BIM", "Forum", "Courses", "Gallery", "Projects"],
+      ["Manufacturers", "For manufacturers", "BIM Marketing", "Analytics", "Publish product", "Plans"],
+      ["Support", "Help center", "Terms of use", "Privacy", "Cookie policy"],
+    ],
+    header: { plans: "Plans", admin: "Admin", notifications: "Notifications", noNotifications: "No notifications", accountMenu: "Open account menu", editProfile: "Edit Profile", faq: "FAQ", logout: "Sign out", login: "Sign in", lightMode: "Light Mode", darkMode: "Dark Mode", languageName: "English" },
+    moreMenu: { trigger: "More...", title: "BIM library for Revit", detail: "RFA, IFC, DWG formats and ready-to-download collections." },
+    home: {
+      pluginNav: "Revit Plugin", heroDots: "Featured InfraBIM messages", heroDot: "View message: ", searchAria: "Main search", searchPlaceholder: "90 cm fire door for hospital", searchButton: "Search families", commonSearches: "Common searches:",
+      popularTitle: "Popular", popularDescription: "Top-rated Revit families by InfraBIM users.", detailButton: "View details ->", download: "Download", catalogEmptyTitle: "Catalog has no publications", catalogEmptyText: "Published resources will appear here.",
+      manufacturersTitle: "Manufacturers", manufacturersDescription: "Brands with BIM catalogs, technical sheets, and commercial analytics.", makerProductsSingular: "product", makerProductsPlural: "products", makerEmpty: "Publish real resources with the manufacturer field to enable these filters.",
+      materialsTitle: "Materials", materialsDescription: "Finishes, technical sheets, and parameters ready for estimates.", materialsButton: "View materials", materialCards: [
+        { name: "Exposed concrete", detail: "Mineral texture for walls, slabs, and visible elements.", visual: "concrete", Icon: Building2 },
+        { name: "Walnut melamine", detail: "Wood finish for BIM furniture and millwork.", visual: "wood", Icon: Trees },
+        { name: "Tempered glass", detail: "Transparent surface for partitions, doors, and facades.", visual: "glass", Icon: PanelsTopLeft },
+        { name: "Galvanized steel", detail: "Protected metal for structures, railings, and supports.", visual: "steel", Icon: Wrench },
+      ],
+      collectionsTitle: "Collections", collectionsDescription: "Complete bundles published from the real InfraBIM database.", collectionsButton: "View collections", collectionReal: "Real collection", collectionsEmptyTitle: "No real collections published", collectionsEmptyText: "Packages created as Collections from the admin panel will appear here.",
+      projectsTitle: "Projects", projectsDescription: "BIM packages published from the real InfraBIM database.", projectsButton: "View projects", projectFallback: "BIM project", published: "Published on InfraBIM", projectsEmptyTitle: "No real projects published", projectsEmptyText: "Project packages created from the admin panel will appear here.",
+    },
+    pluginHome: { eyebrow: "Revit Plugin", title: "Insert BIM families with one click from your workflow.", description: "Installer with InfraBIM identity, integrated WebView2, and direct catalog access from Revit.", installerAria: "InfraBIM installer", compatibility: "Revit 2024 - 2026", userInstall: "Per-user installation", webview: "WebView2 included", functions: "View features", downloadZip: "Download ZIP", imageAlt: "Render of the InfraBIM plugin operating inside Revit with BIM catalog and 3D model" },
+    pluginPage: {
+      eyebrow: "Exclusive InfraBIM plugin", title: "Install InfraBIM for Revit and use the catalog from your model.", description: "Download the installer ZIP, sign in with your InfraBIM account, and connect Revit with families, materials, collections, and technical files published on the platform.", downloadUser: "Download installer ZIP", downloadGuest: "Sign in and download ZIP", compatibleCatalog: "View compatible catalog", metaAria: "Installer compatibility", compatibility: "Revit 2024 - 2026", userInstall: "Per-user installation", previewAlt: "Render of the InfraBIM plugin operating inside Revit with BIM catalog and 3D model", panelTitle: "InfraBIM Plugin", panelStrong: "Search. Preview. Load.", panelSmall: "BIM library connected to your account.", galleryAria: "InfraBIM plugin workflow renders", interfaceAlt: "Render of the InfraBIM search and categories interface in Revit", interfaceCaption: "Search families from Revit", insertAlt: "Render of a BIM family inserted from InfraBIM into a Revit model", insertCaption: "Preview and insert into the model", featuresAria: "InfraBIM plugin features",
+      features: [
+        { title: "Guided installation", text: "The installer copies the add-in into Revit 2024, 2025, and 2026 without manual folder setup." },
+        { title: "Protected download", text: "Every download validates the InfraBIM session and keeps secure access to linked files, ZIPs, and folders." },
+        { title: "Insert families", text: "Load compatible families and open catalog resources to speed documentation and coordination." },
+        { title: "Favorites and library", text: "Save frequent elements for reuse across projects, teams, and recurring deliverables." },
+        { title: "3D and AR preview", text: "Review GLB models, previews, and technical metadata before bringing them into the project." },
+        { title: "Roles and permissions", text: "Works with InfraBIM access control for teams, manufacturers, and administrators." },
+      ],
+      downloadTitle: "Secure installer download", downloadText: "The button validates your session before starting the download. If you are not signed in, Google Auth opens first.", downloadButton: "Download installer ZIP",
+    },
+    plans: { eyebrow: "InfraBIM Plans", title: "The best projects start here", description: "Everything you need, directly in Revit and in your InfraBIM library.", unavailableTitle: "Prices unavailable", unavailableText: "Real prices could not be loaded from Firestore.", benefits: "Benefits:", freeTitle: "Free", freeDescription: "For exploring the catalog and testing the BIM workflow.", freeBenefits: ["Revit plugin", "Limited access to free InfraBIM families", "Products from national and international manufacturers", "Materials with render-ready textures"], paidBenefits: ["Revit plugin", "More than 9,000 families instantly available", "25 new families every week, up to 1,300 per year + extra collections", "Products from national and international manufacturers", "Materials with render-ready textures", "Smart suggestions for related elements", "Teams with modular permissions by role"], viewPlugin: "View plugin", popular: "Popular", userMonth: "User/Month", subscribe: "Subscribe", yape: "Pay with Yape", studentNote: "Student discount. Eligibility verification will be required.", plansAria: "Available plans", checkoutReady: "Checkout ready." },
+    footer: { copyright: "InfraBIM Copyright 2026. All rights reserved.", themeAria: "Change theme" },
+    support: { title: "InfraBIM Support", openPanel: "Open panel", connectGoogle: "Connect Google", viewPlugin: "View plugin", chatAria: "Open support" },
+    topStrip: { users: "Unlock your BIM workflow: 9000+ families in one place. View plans ->", companies: "For Companies: boost your products ->" },
+  },
+};
 const DEFAULT_GOOGLE_DRIVE_ROOT_FOLDER_ID = "1rgmaezSy8mEwkYi0RTqHSne1fLue1p6U";
 const driveFolderId = import.meta.env.VITE_GOOGLE_DRIVE_ROOT_FOLDER_ID || DEFAULT_GOOGLE_DRIVE_ROOT_FOLDER_ID;
 const firebaseProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || "infrabimss";
@@ -1170,12 +1451,34 @@ export default function App() {
   const [userRole, setUserRole] = useState<RoleKey>("Usuario");
   const [userSubscription, setUserSubscription] = useState<UserSubscription | null>(null);
   const [accessControl, setAccessControl] = useState<AccessControl | null>(null);
-  const [language, setLanguage] = useState<"ES" | "EN">("ES");
+  const [language, setLanguage] = useState<Language>(() => {
+    const saved = localStorage.getItem("infrabim_language");
+    return saved === "EN" ? "EN" : "ES";
+  });
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("infrabim_theme");
     if (saved === "dark" || saved === "light") return saved;
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
+
+
+  const copy = uiCopy[language];
+  const catalogUiMeta = useMemo<Record<CatalogKind, { label: string; singular: string; description: string; Icon: LucideIcon }>>(() => {
+    return (Object.keys(catalogMeta) as CatalogKind[]).reduce((acc, kind) => {
+      acc[kind] = { ...catalogMeta[kind], ...copy.catalogMeta[kind] };
+      return acc;
+    }, {} as Record<CatalogKind, { label: string; singular: string; description: string; Icon: LucideIcon }>);
+  }, [copy]);
+  const localizedNavigation = copy.navigation;
+  const localizedMoreMenuColumns = copy.moreMenuColumns;
+  const localizedCategories = copy.categories;
+  const localizedHeroSlides = copy.heroSlides;
+  const localizedFooterGroups = copy.footerGroups;
+
+  useEffect(() => {
+    document.documentElement.lang = language === "ES" ? "es" : "en";
+    localStorage.setItem("infrabim_language", language);
+  }, [language]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -1188,11 +1491,11 @@ export default function App() {
 
   useEffect(() => {
     const slider = window.setInterval(() => {
-      setHeroSlideIndex((index) => (index + 1) % heroSlides.length);
+      setHeroSlideIndex((index) => (index + 1) % localizedHeroSlides.length);
     }, 5600);
 
     return () => window.clearInterval(slider);
-  }, []);
+  }, [localizedHeroSlides.length]);
 
   useEffect(() => {
     if (!accountMenuOpen) {
@@ -1974,7 +2277,7 @@ export default function App() {
     catalogItems.find((product) => product.id === selectedId) ??
     filteredProducts[0] ??
     productToCatalog(products[0]);
-  const activeHeroSlide = heroSlides[heroSlideIndex];
+  const activeHeroSlide = localizedHeroSlides[heroSlideIndex % localizedHeroSlides.length];
   const isAdminPage = route === "/admin";
   const isPlansPage = route === "/planes";
   const isPluginPage = route === "/plugin-revit";
@@ -4180,22 +4483,37 @@ export default function App() {
 
     const actionMap: Record<string, () => void> = {
       "Sobre Nosotros": () => goToPluginPage(),
+      "About Us": () => goToPluginPage(),
       Blog: () => navigateTo("/galeria"),
       FAQ: () => openFaqFromMenu(),
       "Que hay de nuevo": () => navigateTo("/familias"),
+      "What is new": () => navigateTo("/familias"),
       "Lo que viene": () => goToPlans(),
+      "Coming next": () => goToPlans(),
       "Para Fabricantes": () => navigateTo("/marcas"),
+      "For Manufacturers": () => navigateTo("/marcas"),
       "Desarrollo Estrategico": () => navigateTo("/marcas"),
+      "Strategic Development": () => navigateTo("/marcas"),
       "Publicacion Dirigida": () => navigateTo("/marcas"),
+      "Directed Publishing": () => navigateTo("/marcas"),
       "Marketing Personalizado": () => navigateTo("/marcas"),
+      "Personalized Marketing": () => navigateTo("/marcas"),
       Planes: () => goToPlans(),
+      Plans: () => goToPlans(),
       "Preguntas Frecuentes": () => openFaqFromMenu(),
+      "Frequently Asked Questions": () => openFaqFromMenu(),
       "Para Afiliados": () => navigateTo("/planes"),
+      "For Affiliates": () => navigateTo("/planes"),
       "Materiales Promocionales": () => navigateTo("/materiales"),
+      "Promotional Materials": () => navigateTo("/materiales"),
       "Politica de Promocion": () => navigateTo("/planes"),
+      "Promotion Policy": () => navigateTo("/planes"),
       "Terminos de uso": () => goToPlans(),
+      "Terms of use": () => goToPlans(),
       "Politica de privacidad": () => goToPlans(),
+      "Privacy policy": () => goToPlans(),
       "Politica de Cookies": () => goToPlans(),
+      "Cookie policy": () => goToPlans(),
     };
 
     (actionMap[label] || (() => navigateTo("/familias")))();
@@ -4205,13 +4523,13 @@ export default function App() {
     return (
       <div className="more-nav-wrap">
         <button className={moreMenuOpen ? "more-nav-trigger is-open" : "more-nav-trigger"} onClick={toggleMoreMenu} type="button" aria-expanded={moreMenuOpen}>
-          Mas...
+          {copy.moreMenu.trigger}
           <ChevronDown aria-hidden="true" size={14} />
         </button>
         {moreMenuOpen && (
           <div className="more-mega-menu">
             <div className="more-mega-columns">
-              {moreMenuColumns.map((group) => (
+              {localizedMoreMenuColumns.map((group) => (
                 <div className="more-mega-column" key={group.title}>
                   <strong>{group.title}</strong>
                   {group.links.map((link) => (
@@ -4232,8 +4550,8 @@ export default function App() {
                 </span>
               </span>
               <span>
-                <strong>Biblioteca BIM para Revit</strong>
-                <small>Formatos RFA, IFC, DWG y colecciones listas para descargar.</small>
+                <strong>{copy.moreMenu.title}</strong>
+                <small>{copy.moreMenu.detail}</small>
               </span>
               <ArrowRight aria-hidden="true" size={16} />
             </button>
@@ -4244,23 +4562,33 @@ export default function App() {
   }
 
   function handleFooterAction(label: string) {
-    if (label === "Publicar producto") {
+    if (label === "Publicar producto" || label === "Publish product") {
       goToAdmin();
       return;
     }
 
     const map: Record<string, string> = {
       Inicio: "inicio",
+      Home: "inicio",
       "Plugin Revit": "/plugin-revit",
+      "Revit Plugin": "/plugin-revit",
       Planes: "/planes",
       Familias: "/familias",
+      Families: "/familias",
       Materiales: "/materiales",
+      Materials: "/materiales",
       Colecciones: "/colecciones",
+      Collections: "/colecciones",
       Fabricantes: "/marcas",
+      Manufacturers: "/marcas",
       Proyectos: "/proyectos",
+      Projects: "/proyectos",
       Galeria: "/galeria",
+      Gallery: "/galeria",
       "Para fabricantes": "fabricantes",
+      "For manufacturers": "fabricantes",
       "Aprende BIM": "galeria",
+      "Learn BIM": "galeria",
     };
 
     if (map[label]?.startsWith("/")) {
@@ -4349,6 +4677,20 @@ export default function App() {
     );
   }
 
+  function renderImageBrandBadge() {
+    return (
+      <span className="image-brand-badge" aria-hidden="true">
+        <span className="brand-cube image-brand-cube">
+          <span className="brand-layer brand-layer-top" />
+          <span className="brand-layer brand-layer-glass" />
+          <span className="brand-layer brand-layer-shadow" />
+          <span className="brand-layer brand-layer-plan" />
+        </span>
+        <span className="brand-word">Infra<span>BIM</span></span>
+      </span>
+    );
+  }
+
   function renderProfileEditorModal() {
     if (!profileEditorOpen || !user) {
       return null;
@@ -4368,7 +4710,7 @@ export default function App() {
           <div className="profile-modal-head">
             <div>
               <span>Cuenta InfraBIM</span>
-              <h2>Editar Perfil</h2>
+              <h2>{copy.header.editProfile}</h2>
             </div>
             <button aria-label="Cerrar editor de perfil" onClick={() => setProfileEditorOpen(false)} type="button">
               <X aria-hidden="true" size={18} />
@@ -4420,7 +4762,7 @@ export default function App() {
     return (
       <nav className="desktop-actions account-actions" aria-label="Acciones principales">
         <button className={active === "plans" ? "header-plan-link is-current" : "header-plan-link"} onClick={goToPlans} type="button">
-          Planes
+          {copy.header.plans}
         </button>
         {isAdmin && (
           <button className={active === "admin" ? "header-admin-link is-current" : "header-admin-link"} onClick={goToAdmin} type="button">
@@ -4432,8 +4774,8 @@ export default function App() {
             className="header-notification-button"
             onClick={openHeaderNotifications}
             type="button"
-            aria-label={notificationCount > 0 ? `Notificaciones: ${notificationCount}` : "Sin notificaciones"}
-            title={notificationCount > 0 ? `Notificaciones: ${notificationCount}` : "Sin notificaciones"}
+            aria-label={notificationCount > 0 ? `${copy.header.notifications}: ${notificationCount}` : copy.header.noNotifications}
+            title={notificationCount > 0 ? `${copy.header.notifications}: ${notificationCount}` : copy.header.noNotifications}
           >
             <Bell aria-hidden="true" size={18} />
             {notificationCount > 0 && <span>{Math.min(notificationCount, 9)}</span>}
@@ -4448,7 +4790,7 @@ export default function App() {
               type="button"
               aria-expanded={accountMenuOpen}
               aria-haspopup="menu"
-              aria-label="Abrir menu de cuenta"
+              aria-label={copy.header.accountMenu}
             >
               {renderAccountAvatar("small")}
               <ChevronDown aria-hidden="true" size={15} />
@@ -4468,15 +4810,15 @@ export default function App() {
 
                 <button className="account-dropdown-item" onClick={openProfileEditor} role="menuitem" type="button">
                   <Edit3 aria-hidden="true" size={18} />
-                  Editar Perfil
+                  {copy.header.editProfile}
                 </button>
                 <button className="account-dropdown-item" onClick={openFaqFromMenu} role="menuitem" type="button">
                   <CircleHelp aria-hidden="true" size={18} />
-                  Preguntas Frecuentes
+                  {copy.header.faq}
                 </button>
                 <button className="account-dropdown-item is-danger" onClick={handleAccountSignOut} role="menuitem" type="button">
                   <LogOut aria-hidden="true" size={18} />
-                  Salir
+                  {copy.header.logout}
                 </button>
               </div>
             )}
@@ -4489,7 +4831,7 @@ export default function App() {
             type="button"
           >
             <User2 aria-hidden="true" size={17} />
-            Iniciar Sesion
+            {copy.header.login}
           </button>
         )}
 
@@ -4497,8 +4839,8 @@ export default function App() {
           className="theme-button"
           onClick={toggleTheme}
           type="button"
-          aria-label={theme === "dark" ? "Modo Claro" : "Modo Oscuro"}
-          title={theme === "dark" ? "Modo Claro" : "Modo Oscuro"}
+          aria-label={theme === "dark" ? copy.header.lightMode : copy.header.darkMode}
+          title={theme === "dark" ? copy.header.lightMode : copy.header.darkMode}
         >
           {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
         </button>
@@ -4510,14 +4852,19 @@ export default function App() {
   }
 
   function runSearch() {
+    const queryText = query.trim();
+    const searchLabel = catalogUiMeta[searchKind].label.toLowerCase();
     navigateTo(`/${searchKind}`);
     setConnectionLog(
-      query.trim()
-        ? `Busqueda activa en ${catalogMeta[searchKind].label.toLowerCase()}: ${query.trim()}.`
-        : `Mostrando ${catalogMeta[searchKind].label.toLowerCase()}.`,
+      queryText
+        ? language === "ES"
+          ? `Busqueda activa en ${searchLabel}: ${queryText}.`
+          : `Active search in ${searchLabel}: ${queryText}.`
+        : language === "ES"
+          ? `Mostrando ${searchLabel}.`
+          : `Showing ${searchLabel}.`,
     );
   }
-
   function toggleCatalogMenu(menu: "sort" | "resource" | "maker" | "advanced") {
     setOpenCatalogMenu((current) => (current === menu ? "" : menu));
   }
@@ -4866,7 +5213,7 @@ export default function App() {
         <span className="fallback-icon-wrapper">
           {getCategoryIcon(product.category, product.kind)}
         </span>
-        <span className="fallback-badge">{product.category || catalogMeta[product.kind]?.singular || "BIM"}</span>
+        <span className="fallback-badge">{product.category || catalogUiMeta[product.kind]?.singular || "BIM"}</span>
       </span>
     );
   }
@@ -5015,7 +5362,7 @@ export default function App() {
                 </i>
                 <b>
                   <Download aria-hidden="true" size={13} />
-                  <span>Descargar</span>
+                  <span>{copy.home.download}</span>
                 </b>
               </span>
             </button>
@@ -5167,7 +5514,7 @@ export default function App() {
             </div>
           ) : (
             <p className="payment-status" aria-live="polite">
-              {checkoutStatus || "Checkout listo."}
+              {checkoutStatus || copy.plans.checkoutReady}
             </p>
           )}
         </section>
@@ -5178,9 +5525,9 @@ export default function App() {
   function renderPlansPage() {
     const renderPlansHero = () => (
       <div className="plans-page-hero">
-        <span>Planes InfraBIM</span>
-        <h1>Los mejores proyectos empiezan aqui</h1>
-        <p>Todo lo que necesitas, directamente en Revit y en tu biblioteca InfraBIM.</p>
+        <span>{copy.plans.eyebrow}</span>
+        <h1>{copy.plans.title}</h1>
+        <p>{copy.plans.description}</p>
       </div>
     );
 
@@ -5198,8 +5545,8 @@ export default function App() {
         <section className="plans-page">
           {renderPlansHero()}
           {renderDatabaseMessage(
-            "Precios no disponibles",
-            "No se pudieron cargar los precios reales desde Firestore.",
+            copy.plans.unavailableTitle,
+            copy.plans.unavailableText,
             () => void refreshPaymentPlans(),
           )}
         </section>
@@ -5215,50 +5562,37 @@ export default function App() {
     const studentBasePrice = formatMoney(professionalAmount);
     const studentDiscount =
       professionalAmount > studentAmount ? Math.round(100 - (studentAmount / professionalAmount) * 100) : 0;
-    const paidBenefits = [
-      "Plugin para Revit",
-      "Mas de 9,000 familias disponibles al instante",
-      "25 familias nuevas cada semana, hasta 1,300 al ano + colecciones extra",
-      "Productos de fabricantes nacionales e internacionales",
-      "Materiales con texturas listas para renderizar",
-      "Sugerencias inteligentes de elementos relacionados",
-      "Equipos con permisos modulares por rol",
-    ];
+    const paidBenefits = copy.plans.paidBenefits;
 
     return (
       <section className="plans-page">
         {renderPlansHero()}
 
-        <div className="pricing-grid" aria-label="Planes disponibles">
+        <div className="pricing-grid" aria-label={copy.plans.plansAria}>
           <article className="pricing-card free-plan">
             <div className="pricing-card-head">
               <span className="plan-icon">
                 <Download aria-hidden="true" size={21} />
               </span>
               <div>
-                <h2>Gratis</h2>
-                <p>Para explorar el catalogo y probar el flujo BIM.</p>
+                <h2>{copy.plans.freeTitle}</h2>
+                <p>{copy.plans.freeDescription}</p>
               </div>
             </div>
 
             <div className="free-price">S/ 0</div>
-            <h3>Beneficios:</h3>
-            {renderPlanBenefits([
-              "Plugin para Revit",
-              "Acceso limitado a familias gratuitas de InfraBIM",
-              "Productos de fabricantes nacionales e internacionales",
-              "Materiales con texturas listas para renderizar",
-            ])}
+            <h3>{copy.plans.benefits}</h3>
+            {renderPlanBenefits(copy.plans.freeBenefits)}
 
             <button className="plan-cta secondary" onClick={goToPluginPage} type="button">
-              Ver plugin
+              {copy.support.viewPlugin}
               <Download aria-hidden="true" size={16} />
             </button>
           </article>
 
           <article className="pricing-card featured-plan">
             <span className="popular-badge">
-              Popular
+              {copy.plans.popular}
               <Crown aria-hidden="true" size={14} />
             </span>
             <div className="pricing-card-head">
@@ -5273,16 +5607,16 @@ export default function App() {
 
             <div className="price-row">
               <strong>{professionalPrice}</strong>
-              <span>Usuario/Mes</span>
+              <span>{copy.plans.userMonth}</span>
             </div>
             {renderBillingToggle()}
 
-            <h3>Beneficios:</h3>
+            <h3>{copy.plans.benefits}</h3>
             {renderPlanBenefits(paidBenefits)}
 
             <div className="plan-actions">
               <button className="plan-cta" onClick={() => startCheckout("profesional", "card")} type="button">
-                Suscribirme
+                {copy.plans.subscribe}
                 <CreditCard aria-hidden="true" size={16} />
               </button>
               <button
@@ -5292,7 +5626,7 @@ export default function App() {
                 title={professionalAmount < MIN_YAPE_PAYMENT_AMOUNT_PEN ? "Yape requiere al menos " + formatMoney(MIN_YAPE_PAYMENT_AMOUNT_PEN) + "." : undefined}
                 type="button"
               >
-                Pagar con Yape
+                {copy.plans.yape}
                 <Smartphone aria-hidden="true" size={16} />
               </button>
             </div>
@@ -5315,17 +5649,17 @@ export default function App() {
             </div>
             <div className="price-row">
               <strong>{studentPrice}</strong>
-              <span>Usuario/Mes</span>
+              <span>{copy.plans.userMonth}</span>
             </div>
             {renderBillingToggle()}
 
-            <h3>Beneficios:</h3>
+            <h3>{copy.plans.benefits}</h3>
             {renderPlanBenefits(paidBenefits)}
-            <p className="plan-note">Descuento para estudiantes. Sera necesario acreditar la elegibilidad.</p>
+            <p className="plan-note">{copy.plans.studentNote}</p>
 
             <div className="plan-actions">
               <button className="plan-cta" onClick={() => startCheckout("estudiante", "card")} type="button">
-                Suscribirme
+                {copy.plans.subscribe}
                 <CreditCard aria-hidden="true" size={16} />
               </button>
               <button
@@ -5335,7 +5669,7 @@ export default function App() {
                 title={studentAmount < MIN_YAPE_PAYMENT_AMOUNT_PEN ? "Yape requiere al menos " + formatMoney(MIN_YAPE_PAYMENT_AMOUNT_PEN) + "." : undefined}
                 type="button"
               >
-                Pagar con Yape
+                {copy.plans.yape}
                 <Smartphone aria-hidden="true" size={16} />
               </button>
             </div>
@@ -5347,24 +5681,24 @@ export default function App() {
   }
 
   function renderSearchKindControl() {
-    const ActiveIcon = catalogMeta[searchKind].Icon;
+    const ActiveIcon = catalogUiMeta[searchKind].Icon;
 
     return (
       <div className="search-kind-menu">
         <button className="search-kind" onClick={openSearchFamilies} type="button">
           <ActiveIcon aria-hidden="true" size={17} />
-          {catalogMeta[searchKind].label}
+          {catalogUiMeta[searchKind].label}
           <ChevronDown aria-hidden="true" size={16} />
         </button>
         {searchMenuOpen && (
           <div className="search-kind-options">
             {searchKinds.map((kind) => {
-              const OptionIcon = catalogMeta[kind].Icon;
+              const OptionIcon = catalogUiMeta[kind].Icon;
 
               return (
                 <button key={kind} onClick={() => chooseSearchKind(kind)} type="button">
                   <OptionIcon aria-hidden="true" size={18} />
-                  {catalogMeta[kind].label}
+                  {catalogUiMeta[kind].label}
                 </button>
               );
             })}
@@ -5543,7 +5877,7 @@ export default function App() {
 
   function renderCatalogListPage() {
     const kind = activeRouteKind ?? "familias";
-    const meta = catalogMeta[kind];
+    const meta = catalogUiMeta[kind];
     const PageIcon = meta.Icon;
     const isMakerResultsPage = Boolean(selectedMaker && kind === "marcas");
     const scopedProducts = catalogItems.filter((product) => {
@@ -5754,7 +6088,7 @@ export default function App() {
       );
     }
 
-    const DetailIcon = catalogMeta[routeCatalogItem.kind].Icon;
+    const DetailIcon = catalogUiMeta[routeCatalogItem.kind].Icon;
     const has3dModel = Boolean(routeCatalogItem.glbUrl || routeCatalogItem.has3D);
 
     return (
@@ -5809,7 +6143,7 @@ export default function App() {
 
             <div className="detail-title">
               <div>
-                <p>Inicio / {catalogMeta[routeCatalogItem.kind].label} / {routeCatalogItem.name}</p>
+                <p>Inicio / {catalogUiMeta[routeCatalogItem.kind].label} / {routeCatalogItem.name}</p>
                 <h2>{routeCatalogItem.name}</h2>
                 <span>
                   <DetailIcon aria-hidden="true" size={18} />
@@ -6639,88 +6973,59 @@ export default function App() {
   }
 
   function renderPluginLandingPage() {
-    const featureCards: Array<{ Icon: LucideIcon; title: string; text: string }> = [
-      {
-        Icon: Search,
-        title: "Busqueda BIM desde Revit",
-        text: "Encuentra familias por nombre, categoria, fabricante, formato o version sin salir del flujo de modelado.",
-      },
-      {
-        Icon: Download,
-        title: "Descargas protegidas",
-        text: "Toda descarga valida sesion InfraBIM y conserva el acceso seguro a archivos, ZIP y carpetas vinculadas.",
-      },
-      {
-        Icon: Box,
-        title: "Insertar familias",
-        text: "Carga familias compatibles y abre recursos del catalogo para acelerar documentacion y coordinacion.",
-      },
-      {
-        Icon: Heart,
-        title: "Favoritos y biblioteca",
-        text: "Guarda elementos frecuentes para reutilizarlos en proyectos, equipos y entregables recurrentes.",
-      },
-      {
-        Icon: Sparkles,
-        title: "Vista 3D y AR",
-        text: "Revisa modelos GLB, previews y metadatos tecnicos antes de llevarlos al proyecto.",
-      },
-      {
-        Icon: ShieldCheck,
-        title: "Roles y permisos",
-        text: "Funciona con el control de acceso de InfraBIM para equipos, fabricantes y administradores.",
-      },
-    ];
+    const featureIcons: LucideIcon[] = [Search, Download, Box, Heart, Sparkles, ShieldCheck];
+    const featureCards: Array<{ Icon: LucideIcon; title: string; text: string }> = copy.pluginPage.features.map((feature, index) => ({
+      Icon: featureIcons[index] || Sparkles,
+      ...feature,
+    }));
 
     return (
       <section className="plugin-exclusive-page">
         <div className="plugin-exclusive-hero">
           <div className="plugin-exclusive-copy">
-            <p>Plugin exclusivo InfraBIM</p>
-            <h1>Instala InfraBIM para Revit y trabaja el catalogo desde tu modelo.</h1>
-            <span>
-              Descarga el instalador ZIP, inicia sesion con tu cuenta InfraBIM y conecta Revit con familias, materiales,
-              colecciones y archivos tecnicos publicados en la plataforma.
-            </span>
+            <p>{copy.pluginPage.eyebrow}</p>
+            <h1>{copy.pluginPage.title}</h1>
+            <span>{copy.pluginPage.description}</span>
             <div className="plugin-exclusive-actions">
               <button disabled={busy === "auth"} onClick={() => void downloadPluginInstaller()} type="button">
                 <Download aria-hidden="true" size={18} />
-                {user ? "Descargar ZIP del instalador" : "Iniciar sesion y descargar ZIP"}
+                {user ? copy.pluginPage.downloadUser : copy.pluginPage.downloadGuest}
               </button>
               <button onClick={() => navigateTo("/familias")} type="button">
                 <LayoutGrid aria-hidden="true" size={18} />
-                Ver catalogo compatible
+                {copy.pluginPage.compatibleCatalog}
               </button>
             </div>
-            <div className="plugin-exclusive-meta" aria-label="Compatibilidad del instalador">
-              <span>Revit 2024 - 2026</span>
-              <span>Instalacion por usuario</span>
+            <div className="plugin-exclusive-meta" aria-label={copy.pluginPage.metaAria}>
+              <span>{copy.pluginHome.compatibility}</span>
+              <span>{copy.pluginHome.userInstall}</span>
               <span>Archivo ZIP: {pluginInstallerZipName}</span>
             </div>
           </div>
           <div className="plugin-exclusive-preview">
             <div className="plugin-preview-stage">
-              <img src="/bim-hero.png" alt="Render del plugin InfraBIM operando dentro de Revit con catalogo BIM y modelo 3D" />
+              {renderImageBrandBadge()}
+              <img src="/bim-hero.png" alt={copy.pluginPage.previewAlt} />
               <div className="plugin-preview-panel">
-                <span>InfraBIM Plugin</span>
-                <strong>Buscar. Previsualizar. Cargar.</strong>
-                <small>Biblioteca BIM conectada a tu cuenta.</small>
+                <span>{copy.pluginPage.panelTitle}</span>
+                <strong>{copy.pluginPage.panelStrong}</strong>
+                <small>{copy.pluginPage.panelSmall}</small>
               </div>
             </div>
-            <div className="plugin-preview-gallery" aria-label="Renders del flujo de trabajo del plugin InfraBIM">
+            <div className="plugin-preview-gallery" aria-label={copy.pluginPage.galleryAria}>
               <figure>
-                <img src="/plugin-interface-render.png" alt="Render de la interfaz de busqueda y categorias del plugin InfraBIM en Revit" />
-                <figcaption>Buscar familias desde Revit</figcaption>
+                <img src="/plugin-interface-render.png" alt={copy.pluginPage.interfaceAlt} />
+                <figcaption>{copy.pluginPage.interfaceCaption}</figcaption>
               </figure>
               <figure>
-                <img src="/plugin-insert-render.png" alt="Render de una familia BIM insertada desde InfraBIM en un modelo de Revit" />
-                <figcaption>Previsualizar e insertar en el modelo</figcaption>
+                <img src="/plugin-insert-render.png" alt={copy.pluginPage.insertAlt} />
+                <figcaption>{copy.pluginPage.insertCaption}</figcaption>
               </figure>
             </div>
           </div>
         </div>
 
-        <div className="plugin-feature-grid" aria-label="Funciones del plugin InfraBIM">
+        <div className="plugin-feature-grid" aria-label={copy.pluginPage.featuresAria}>
           {featureCards.map(({ Icon, title, text }) => (
             <article key={title}>
               <span><Icon aria-hidden="true" size={20} /></span>
@@ -6732,12 +7037,12 @@ export default function App() {
 
         <div className="plugin-download-band">
           <div>
-            <h2>Descarga segura del instalador</h2>
-            <p>El boton valida sesion antes de iniciar la descarga. Si no has ingresado, primero se abrira Google Auth.</p>
+            <h2>{copy.pluginPage.downloadTitle}</h2>
+            <p>{copy.pluginPage.downloadText}</p>
           </div>
           <button disabled={busy === "auth"} onClick={() => void downloadPluginInstaller()} type="button">
             <Download aria-hidden="true" size={18} />
-            Descargar instalador ZIP
+            {copy.pluginPage.downloadButton}
           </button>
         </div>
       </section>
@@ -7494,7 +7799,7 @@ export default function App() {
                   value={catalogDraft.kind}
                 >
                   {(Object.keys(catalogMeta) as CatalogKind[]).map((kind) => (
-                    <option key={kind} value={kind}>{catalogMeta[kind].label}</option>
+                    <option key={kind} value={kind}>{catalogUiMeta[kind].label}</option>
                   ))}
                 </select>
               </label>
@@ -7870,14 +8175,14 @@ export default function App() {
           </div>
 
           <nav className="secondary-nav" aria-label="Navegacion del catalogo">
-            {navigation.map((item) => (
+            {localizedNavigation.map((item) => (
               <button key={item.path} onClick={() => handleNavigation(item.path)} type="button">
                 {item.label}
               </button>
             ))}
             {renderMoreNavMenu()}
             <button className="is-current" onClick={goToPluginPage} type="button">
-              Plugin para Revit
+              {copy.home.pluginNav}
             </button>
           </nav>
         </header>
@@ -7886,7 +8191,7 @@ export default function App() {
 
         <footer className="site-footer">
           <div className="footer-grid">
-            {footerGroups.map(([title, ...links]) => (
+            {localizedFooterGroups.map(([title, ...links]) => (
               <div key={title}>
                 <h3>{title}</h3>
                 {links.map((link) => (
@@ -7899,9 +8204,9 @@ export default function App() {
           </div>
           <div className="footer-bottom">
             <strong>InfraBIM</strong>
-            <span>InfraBIM Copyright 2026. Todos los derechos reservados.</span>
+            <span>{copy.footer.copyright}</span>
             <button onClick={toggleLanguage} type="button">
-              {language === "ES" ? "Espanol" : "English"}
+              {copy.header.languageName}
             </button>
           </div>
         </footer>
@@ -7926,7 +8231,7 @@ export default function App() {
       <main className="site-shell admin-route">
         <div className="top-strip">
           <button onClick={goToPlans} type="button">
-            {"Desbloquea tu flujo BIM: 9000+ familias en un solo lugar. Ver planes ->"}
+            {copy.topStrip.users}
           </button>
           <button onClick={() => scrollTo("fabricantes")} type="button">
             {"Para fabricantes: publica tus productos ->"}
@@ -7967,14 +8272,14 @@ export default function App() {
           </div>
 
           <nav className="secondary-nav" aria-label="Navegacion del catalogo">
-            {navigation.map((item) => (
+            {localizedNavigation.map((item) => (
               <button key={item.path} onClick={() => handleNavigation(item.path)} type="button">
                 {item.label}
               </button>
             ))}
             {renderMoreNavMenu()}
             <button onClick={goToPluginPage} type="button">
-              Plugin para Revit
+              {copy.home.pluginNav}
             </button>
           </nav>
         </header>
@@ -7983,7 +8288,7 @@ export default function App() {
 
         <footer className="site-footer">
           <div className="footer-grid">
-            {footerGroups.map(([title, ...links]) => (
+            {localizedFooterGroups.map(([title, ...links]) => (
               <div key={title}>
                 <h3>{title}</h3>
                 {links.map((link) => (
@@ -7996,9 +8301,9 @@ export default function App() {
           </div>
           <div className="footer-bottom">
             <strong>InfraBIM</strong>
-            <span>InfraBIM Copyright 2026. Todos los derechos reservados.</span>
+            <span>{copy.footer.copyright}</span>
             <button onClick={toggleLanguage} type="button">
-              {language === "ES" ? "Espanol" : "English"}
+              {copy.header.languageName}
             </button>
           </div>
         </footer>
@@ -8007,18 +8312,18 @@ export default function App() {
 
         {supportOpen && (
           <aside className="support-panel" aria-live="polite">
-            <strong>Soporte InfraBIM</strong>
+            <strong>{copy.support.title}</strong>
             <span>{connectionLog}</span>
             <button onClick={user ? goToAdmin : connectGoogleAccount} type="button">
-              {user ? "Abrir panel" : "Conectar Google"}
+              {user ? copy.support.openPanel : copy.support.connectGoogle}
             </button>
             <button onClick={goToPluginPage} type="button">
-              Ver plugin
+              {copy.support.viewPlugin}
             </button>
           </aside>
         )}
 
-        <button className="chat-button" onClick={openSupport} type="button" aria-label="Abrir soporte">
+        <button className="chat-button" onClick={openSupport} type="button" aria-label={copy.support.chatAria}>
           ?
         </button>
       </main>
@@ -8030,10 +8335,10 @@ export default function App() {
       <main className="site-shell plans-route">
         <div className="top-strip">
           <button onClick={goToPlans} type="button">
-            {"Desbloquea tu flujo BIM: 9000+ familias en un solo lugar. Ver planes ->"}
+            {copy.topStrip.users}
           </button>
           <button onClick={() => navigateTo("/marcas")} type="button">
-            {"Para Empresas: impulsa tus productos ->"}
+            {copy.topStrip.companies}
           </button>
         </div>
 
@@ -8071,14 +8376,14 @@ export default function App() {
           </div>
 
           <nav className="secondary-nav" aria-label="Navegacion del catalogo">
-            {navigation.map((item) => (
+            {localizedNavigation.map((item) => (
               <button key={item.path} onClick={() => handleNavigation(item.path)} type="button">
                 {item.label}
               </button>
             ))}
             {renderMoreNavMenu()}
             <button onClick={goToPluginPage} type="button">
-              Plugin para Revit
+              {copy.home.pluginNav}
             </button>
           </nav>
         </header>
@@ -8087,7 +8392,7 @@ export default function App() {
 
         <footer className="site-footer">
           <div className="footer-grid">
-            {footerGroups.map(([title, ...links]) => (
+            {localizedFooterGroups.map(([title, ...links]) => (
               <div key={title}>
                 <h3>{title}</h3>
                 {links.map((link) => (
@@ -8100,9 +8405,9 @@ export default function App() {
           </div>
           <div className="footer-bottom">
             <strong>InfraBIM</strong>
-            <span>InfraBIM Copyright 2026. Todos los derechos reservados.</span>
+            <span>{copy.footer.copyright}</span>
             <button onClick={toggleLanguage} type="button">
-              {language === "ES" ? "Espanol" : "English"}
+              {copy.header.languageName}
             </button>
           </div>
         </footer>
@@ -8111,18 +8416,18 @@ export default function App() {
 
         {supportOpen && (
           <aside className="support-panel" aria-live="polite">
-            <strong>Soporte InfraBIM</strong>
+            <strong>{copy.support.title}</strong>
             <span>{connectionLog}</span>
             <button onClick={user ? goToAdmin : connectGoogleAccount} type="button">
-              {user ? "Abrir panel" : "Conectar Google"}
+              {user ? copy.support.openPanel : copy.support.connectGoogle}
             </button>
             <button onClick={goToPluginPage} type="button">
-              Ver plugin
+              {copy.support.viewPlugin}
             </button>
           </aside>
         )}
 
-        <button className="chat-button" onClick={openSupport} type="button" aria-label="Abrir soporte">
+        <button className="chat-button" onClick={openSupport} type="button" aria-label={copy.support.chatAria}>
           ?
         </button>
       </main>
@@ -8161,7 +8466,7 @@ export default function App() {
                 className="plugin-theme-toggle"
                 onClick={toggleTheme}
                 type="button"
-                aria-label="Cambiar tema"
+                aria-label={copy.footer.themeAria}
               >
                 {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
               </button>
@@ -8180,7 +8485,7 @@ export default function App() {
                   type="button"
                   title="Cerrar sesion"
                 >
-                  Salir
+                  {copy.header.logout}
                 </button>
               )}
             </div>
@@ -8436,7 +8741,7 @@ export default function App() {
                 <div className="plugin-modal-title-group">
                   <div className="plugin-modal-cat-chip">
                     {getCategoryIcon(selectedPluginProduct.category, selectedPluginProduct.kind)}
-                    <span>{selectedPluginProduct.category || catalogMeta[selectedPluginProduct.kind]?.singular}</span>
+                    <span>{selectedPluginProduct.category || catalogUiMeta[selectedPluginProduct.kind]?.singular}</span>
                   </div>
                   <h3>{selectedPluginProduct.name}</h3>
                   <p className="plugin-modal-subtitle">
@@ -8563,10 +8868,10 @@ export default function App() {
       <main className="site-shell catalog-route">
         <div className="top-strip">
           <button onClick={goToPlans} type="button">
-            {"Desbloquea tu flujo BIM: 9000+ familias en un solo lugar. Ver planes ->"}
+            {copy.topStrip.users}
           </button>
           <button onClick={() => navigateTo("/marcas")} type="button">
-            {"Para Empresas: impulsa tus productos ->"}
+            {copy.topStrip.companies}
           </button>
         </div>
 
@@ -8593,7 +8898,7 @@ export default function App() {
               <input
                 aria-label="Buscar recursos BIM"
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder={`Buscar en ${catalogMeta[searchKind].label.toLowerCase()}`}
+                placeholder={`Buscar en ${catalogUiMeta[searchKind].label.toLowerCase()}`}
                 value={query}
               />
               <button className="icon-button" type="submit" aria-label="Buscar">
@@ -8604,7 +8909,7 @@ export default function App() {
           </div>
 
           <nav className="secondary-nav" aria-label="Navegacion del catalogo">
-            {navigation.map((item) => (
+            {localizedNavigation.map((item) => (
               <button
                 className={route === item.path ? "is-current" : ""}
                 key={item.path}
@@ -8616,7 +8921,7 @@ export default function App() {
             ))}
             {renderMoreNavMenu()}
             <button onClick={goToPluginPage} type="button">
-              Plugin para Revit
+              {copy.home.pluginNav}
             </button>
           </nav>
         </header>
@@ -8625,7 +8930,7 @@ export default function App() {
 
         <footer className="site-footer">
           <div className="footer-grid">
-            {footerGroups.map(([title, ...links]) => (
+            {localizedFooterGroups.map(([title, ...links]) => (
               <div key={title}>
                 <h3>{title}</h3>
                 {links.map((link) => (
@@ -8638,9 +8943,9 @@ export default function App() {
           </div>
           <div className="footer-bottom">
             <strong>InfraBIM</strong>
-            <span>InfraBIM Copyright 2026. Todos los derechos reservados.</span>
+            <span>{copy.footer.copyright}</span>
             <button onClick={toggleLanguage} type="button">
-              {language === "ES" ? "Espanol" : "English"}
+              {copy.header.languageName}
             </button>
           </div>
         </footer>
@@ -8649,18 +8954,18 @@ export default function App() {
 
         {supportOpen && (
           <aside className="support-panel" aria-live="polite">
-            <strong>Soporte InfraBIM</strong>
+            <strong>{copy.support.title}</strong>
             <span>{connectionLog}</span>
             <button onClick={user ? goToAdmin : connectGoogleAccount} type="button">
-              {user ? "Abrir panel" : "Conectar Google"}
+              {user ? copy.support.openPanel : copy.support.connectGoogle}
             </button>
             <button onClick={goToPluginPage} type="button">
-              Ver plugin
+              {copy.support.viewPlugin}
             </button>
           </aside>
         )}
 
-        <button className="chat-button" onClick={openSupport} type="button" aria-label="Abrir soporte">
+        <button className="chat-button" onClick={openSupport} type="button" aria-label={copy.support.chatAria}>
           ?
         </button>
       </main>
@@ -8681,15 +8986,15 @@ export default function App() {
             <span className="brand-word">Infra<span>BIM</span></span>
           </button>
 
-          <nav className="home-primary-nav" aria-label="Navegacion principal">
-            {navigation.map((item) => (
+          <nav className="home-primary-nav" aria-label={language === "ES" ? "Navegacion principal" : "Main navigation"}>
+            {localizedNavigation.map((item) => (
               <button key={item.path} onClick={() => handleNavigation(item.path)} type="button">
                 {item.label}
               </button>
             ))}
             {renderMoreNavMenu()}
             <button className="plugin-link" onClick={goToPluginPage} type="button">
-              Plugin para Revit
+              {copy.home.pluginNav}
             </button>
           </nav>
           {renderDesktopActions()}
@@ -8703,10 +9008,10 @@ export default function App() {
             <h1>{activeHeroSlide.title}</h1>
             <span>{activeHeroSlide.description}</span>
           </div>
-          <div className="hero-slider-dots" aria-label="Mensajes destacados InfraBIM">
+          <div className="hero-slider-dots" aria-label={copy.home.heroDots}>
             {heroSlides.map((slide, index) => (
               <button
-                aria-label={"Ver mensaje: " + slide.eyebrow}
+                aria-label={copy.home.heroDot + slide.eyebrow}
                 className={index === heroSlideIndex ? "is-active" : ""}
                 key={slide.eyebrow}
                 onClick={() => setHeroSlideIndex(index)}
@@ -8725,24 +9030,24 @@ export default function App() {
         >
           {renderSearchKindControl()}
           <input
-            aria-label="Busqueda principal"
+            aria-label={copy.home.searchAria}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Puerta cortafuego 90 cm para hospital"
+            placeholder={copy.home.searchPlaceholder}
             value={query}
           />
-          <button className="icon-button" type="submit" aria-label="Buscar familias">
+          <button className="icon-button" type="submit" aria-label={copy.home.searchButton}>
             <Search aria-hidden="true" size={18} />
           </button>
         </form>
 
         <p className="common-searches">
-          Busquedas comunes: <button onClick={() => setCommonSearch("lavamanos accesible")} type="button">lavamanos</button>{" "}
+          {copy.home.commonSearches} <button onClick={() => setCommonSearch("lavamanos accesible")} type="button">lavamanos</button>{" "}
           <button onClick={() => setCommonSearch("ventana corrediza")} type="button">ventana</button>{" "}
           <button onClick={() => setCommonSearch("bomba MEP")} type="button">bomba MEP</button>
         </p>
 
         <div className="category-row" aria-label="Categorias BIM">
-          {categories.map(({ label, filter: itemFilter, Icon }) => (
+          {localizedCategories.map(({ label, filter: itemFilter, Icon }) => (
             <button
               className={filter === itemFilter ? "category-pill is-active" : "category-pill"}
               key={label}
@@ -8764,11 +9069,11 @@ export default function App() {
       <section className="catalog-section" id="familias">
         <div className="section-title">
           <div>
-            <h2>Populares</h2>
-            <p>Familias Revit mejor valoradas por usuarios de InfraBIM.</p>
+            <h2>{copy.home.popularTitle}</h2>
+            <p>{copy.home.popularDescription}</p>
           </div>
           <button onClick={() => scrollTo("detalle")} type="button">
-            {"Ver detalle ->"}
+            {copy.home.detailButton}
           </button>
         </div>
 
@@ -8788,7 +9093,7 @@ export default function App() {
                   </i>
                   <b>
                     <Download aria-hidden="true" size={13} />
-                    <span>Descargar</span>
+                    <span>{copy.home.download}</span>
                   </b>
                 </span>
               </button>
@@ -8796,8 +9101,8 @@ export default function App() {
           </div>
         ) : (
           renderDatabaseMessage(
-            "Catalogo sin publicaciones",
-            catalogError || "Cuando publiques recursos apareceran aqui.",
+            copy.home.catalogEmptyTitle,
+            catalogError || copy.home.catalogEmptyText,
             () => void refreshCatalogItems(),
           )
         )}
@@ -8806,8 +9111,8 @@ export default function App() {
       <section className="brand-section" id="fabricantes">
         <div className="section-title">
           <div>
-            <h2>Fabricantes</h2>
-            <p>Marcas con catalogos BIM, fichas tecnicas y analitica comercial.</p>
+            <h2>{copy.home.manufacturersTitle}</h2>
+            <p>{copy.home.manufacturersDescription}</p>
           </div>
         </div>
         {dbLoading.catalog ? (
@@ -8827,13 +9132,13 @@ export default function App() {
                 aria-label={"Ver productos de " + maker.name}
               >
                 <strong>{maker.name}</strong>
-                <small>{maker.count} {maker.count === 1 ? "producto" : "productos"}</small>
+                <small>{maker.count} {maker.count === 1 ? copy.home.makerProductsSingular : copy.home.makerProductsPlural}</small>
               </button>
             ))}
           </div>
         ) : (
           <div className="brand-empty">
-            Publica recursos reales con el campo fabricante para activar estos filtros.
+            {copy.home.makerEmpty}
           </div>
         )}
       </section>
@@ -8841,20 +9146,15 @@ export default function App() {
       <section className="module-showcase" id="materiales">
         <div className="section-title">
           <div>
-            <h2>Materiales</h2>
-            <p>Acabados, fichas tecnicas y parametros listos para presupuestos.</p>
+            <h2>{copy.home.materialsTitle}</h2>
+            <p>{copy.home.materialsDescription}</p>
           </div>
           <button onClick={() => navigateTo("/materiales")} type="button">
-            Ver materiales
+            {copy.home.materialsButton}
           </button>
         </div>
         <div className="module-card-grid materials-grid">
-          {[
-            { name: "Concreto aparente", detail: "Textura mineral para muros, losas y elementos vistos.", visual: "concrete", Icon: Building2 },
-            { name: "Melamina nogal", detail: "Acabado madera para mobiliario y carpinteria BIM.", visual: "wood", Icon: Trees },
-            { name: "Vidrio templado", detail: "Superficie transparente para mamparas, puertas y fachadas.", visual: "glass", Icon: PanelsTopLeft },
-            { name: "Acero galvanizado", detail: "Metal protegido para estructuras, barandas y soportes.", visual: "steel", Icon: Wrench },
-          ].map(({ name, detail, visual, Icon }) => (
+          {copy.home.materialCards.map(({ name, detail, visual, Icon }) => (
             <button key={name} onClick={() => setCommonSearch(name)} type="button">
               <span className={"material-real-icon material-" + visual} aria-hidden="true">
                 <Icon size={22} />
@@ -8869,11 +9169,11 @@ export default function App() {
       <section className="module-showcase" id="colecciones">
         <div className="section-title">
           <div>
-            <h2>Colecciones</h2>
-            <p>Paquetes completos publicados desde la base real de InfraBIM.</p>
+            <h2>{copy.home.collectionsTitle}</h2>
+            <p>{copy.home.collectionsDescription}</p>
           </div>
           <button onClick={() => navigateTo("/colecciones")} type="button">
-            Ver colecciones
+            {copy.home.collectionsButton}
           </button>
         </div>
         {dbLoading.catalog ? (
@@ -8894,8 +9194,8 @@ export default function App() {
           </div>
         ) : (
           renderDatabaseMessage(
-            "Sin colecciones reales publicadas",
-            "Cuando publiques paquetes con tipo Coleccion desde el panel, apareceran aqui.",
+            copy.home.collectionsEmptyTitle,
+            copy.home.collectionsEmptyText,
             user ? goToAdmin : connectGoogleAccount,
           )
         )}
@@ -8904,11 +9204,11 @@ export default function App() {
       <section className="module-showcase" id="proyectos">
         <div className="section-title">
           <div>
-            <h2>Proyectos</h2>
-            <p>Expedientes BIM publicados desde la base real de InfraBIM.</p>
+            <h2>{copy.home.projectsTitle}</h2>
+            <p>{copy.home.projectsDescription}</p>
           </div>
           <button onClick={() => navigateTo("/proyectos")} type="button">
-            Ver proyectos
+            {copy.home.projectsButton}
           </button>
         </div>
         {dbLoading.catalog ? (
@@ -8928,8 +9228,8 @@ export default function App() {
           </div>
         ) : (
           renderDatabaseMessage(
-            "Sin proyectos reales publicados",
-            "Cuando publiques expedientes con tipo Proyecto desde el panel, apareceran aqui.",
+            copy.home.projectsEmptyTitle,
+            copy.home.projectsEmptyText,
             user ? goToAdmin : connectGoogleAccount,
           )
         )}
@@ -8937,31 +9237,32 @@ export default function App() {
 
       <section className="plugin-section" id="plugin">
         <div className="plugin-copy">
-          <p>Plugin para Revit</p>
-          <h2>Inserta familias BIM con un clic desde tu flujo de trabajo.</h2>
-          <span>
-            Instalador con identidad InfraBIM, WebView2 integrado y acceso directo al catalogo desde Revit.
-          </span>
-          <div className="plugin-installer-panel" aria-label="Instalador InfraBIM">
-            <span>Revit 2024 - 2026</span>
-            <span>Instalacion por usuario</span>
-            <span>WebView2 incluido</span>
+          <p>{copy.pluginHome.eyebrow}</p>
+          <h2>{copy.pluginHome.title}</h2>
+          <span>{copy.pluginHome.description}</span>
+          <div className="plugin-installer-panel" aria-label={copy.pluginHome.installerAria}>
+            <span>{copy.pluginHome.compatibility}</span>
+            <span>{copy.pluginHome.userInstall}</span>
+            <span>{copy.pluginHome.webview}</span>
           </div>
           <div>
             <button onClick={goToPluginPage} type="button">
-              Ver funciones
+              {copy.pluginHome.functions}
             </button>
             <button onClick={() => void downloadPluginInstaller()} type="button">
-              Descargar ZIP
+              {copy.pluginHome.downloadZip}
             </button>
           </div>
         </div>
-        <img src="/bim-hero.png" alt="Render del plugin InfraBIM operando dentro de Revit con catalogo BIM y modelo 3D" />
+                <div className="plugin-section-visual">
+          {renderImageBrandBadge()}
+          <img src="/bim-hero.png" alt={copy.pluginHome.imageAlt} />
+        </div>
       </section>
 
       <footer className="site-footer">
         <div className="footer-grid">
-          {footerGroups.map(([title, ...links]) => (
+          {localizedFooterGroups.map(([title, ...links]) => (
             <div key={title}>
               <h3>{title}</h3>
               {links.map((link) => (
@@ -8974,14 +9275,14 @@ export default function App() {
         </div>
         <div className="footer-bottom">
           <strong>InfraBIM</strong>
-          <span>InfraBIM Copyright 2026. Todos los derechos reservados.</span>
+          <span>{copy.footer.copyright}</span>
           <div className="footer-actions">
-            <button className="theme-button" onClick={toggleTheme} type="button" aria-label="Cambiar tema">
+            <button className="theme-button" onClick={toggleTheme} type="button" aria-label={copy.footer.themeAria}>
               {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-              <span>{theme === "dark" ? "Modo Claro" : "Modo Oscuro"}</span>
+              <span>{theme === "dark" ? copy.header.lightMode : copy.header.darkMode}</span>
             </button>
             <button onClick={toggleLanguage} type="button">
-              {language === "ES" ? "Espanol" : "English"}
+              {copy.header.languageName}
             </button>
           </div>
         </div>
@@ -8991,18 +9292,18 @@ export default function App() {
 
       {supportOpen && (
         <aside className="support-panel" aria-live="polite">
-          <strong>Soporte InfraBIM</strong>
+          <strong>{copy.support.title}</strong>
           <span>{connectionLog}</span>
           <button onClick={user ? goToAdmin : connectGoogleAccount} type="button">
-            {user ? "Abrir panel" : "Conectar Google"}
+            {user ? copy.support.openPanel : copy.support.connectGoogle}
           </button>
           <button onClick={goToPluginPage} type="button">
-            Ver plugin
+            {copy.support.viewPlugin}
           </button>
         </aside>
       )}
 
-      <button className="chat-button" onClick={openSupport} type="button" aria-label="Abrir soporte">
+      <button className="chat-button" onClick={openSupport} type="button" aria-label={copy.support.chatAria}>
         ?
       </button>
 

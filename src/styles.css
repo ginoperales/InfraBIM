@@ -7322,6 +7322,7 @@ button:disabled {
   margin: 0;
 }
 
+[data-theme="dark"] .plugin-preview-gallery figure,
 [data-theme="dark"] .plugin-feature-grid article,
 [data-theme="dark"] .plugin-download-band,
 [data-theme="dark"] .plugin-exclusive-actions button:last-child,
