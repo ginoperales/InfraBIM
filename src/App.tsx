@@ -191,6 +191,10 @@ export interface BulkFolderProgressItem {
   folderName: string;
   cleanName: string;
   fileCount: number;
+  totalBytes: number;
+  uploadedBytes: number;
+  progress: number;
+  currentFilePercent?: number;
   status: "pending" | "uploading" | "completed" | "error";
   currentStep: string;
   processedFiles: number;
@@ -208,6 +212,7 @@ export interface BulkFolderSelectionItem {
   cleanName: string;
   files: BulkUploadFile[];
   fileCount: number;
+  totalBytes: number;
   category: string;
   maker: string;
   formats: string[];
@@ -554,7 +559,8 @@ const footerGroups = [
   ["Soporte", "Centro de ayuda", "Terminos de uso", "Privacidad", "Politica de cookies"],
 ];
 
-const driveFolderId = import.meta.env.VITE_GOOGLE_DRIVE_ROOT_FOLDER_ID || undefined;
+const DEFAULT_GOOGLE_DRIVE_ROOT_FOLDER_ID = "1rgmaezSy8mEwkYi0RTqHSne1fLue1p6U";
+const driveFolderId = import.meta.env.VITE_GOOGLE_DRIVE_ROOT_FOLDER_ID || DEFAULT_GOOGLE_DRIVE_ROOT_FOLDER_ID;
 const firebaseProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || "infrabimss";
 
 function OtpInputBoxes({
@@ -1182,6 +1188,7 @@ export default function App() {
   const [isDragOverBulk, setIsDragOverBulk] = useState(false);
   const [bulkPreparingOpen, setBulkPreparingOpen] = useState(false);
   const [bulkPreparingMessage, setBulkPreparingMessage] = useState("");
+  const [bulkProgressCollapsed, setBulkProgressCollapsed] = useState(false);
 
   const [bulkSelectionModalOpen, setBulkSelectionModalOpen] = useState(false);
   const [bulkSelectionItems, setBulkSelectionItems] = useState<BulkFolderSelectionItem[]>([]);
@@ -2377,7 +2384,7 @@ export default function App() {
         const folderName = `${cleanName} - ${slug}`;
 
         setConnectionLog("Creando subcarpeta en tu Google Drive via API OAuth 2.0...");
-        const folder = await createDriveFolderClient(currentDriveToken, folderName, "1rgmaezSy8mEwkYi0RTqHSne1fLue1p6U");
+        const folder = await createDriveFolderClient(currentDriveToken, folderName, driveFolderId);
         uploadedDriveFolderId = folder.id;
         uploadedDriveFolderLink = folder.webViewLink || `https://drive.google.com/drive/folders/${folder.id}`;
 
@@ -2634,6 +2641,19 @@ export default function App() {
     return segment.replace(/[\/:*?"<>|]/g, "_").trim().slice(0, 160) || "Carpeta";
   }
 
+  function formatBulkBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    let value = bytes;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex++;
+    }
+    const decimals = unitIndex === 0 || value >= 100 ? 0 : 1;
+    return value.toFixed(decimals) + " " + units[unitIndex];
+  }
+
   function normalizeBulkFolderToken(name: string): string {
     return name
       .toLowerCase()
@@ -2716,69 +2736,78 @@ export default function App() {
     if (filesList.length === 0) return;
 
     setBulkPreparingOpen(true);
-    setBulkPreparingMessage(`Leyendo ${filesList.length} archivo(s) y detectando carpetas...`);
+    setBulkPreparingMessage("Leyendo " + filesList.length + " archivo(s) y detectando carpetas...");
 
     try {
       let currentUser = user;
-    if (!currentUser && auth) {
-      try {
-        setBulkPreparingMessage("Abriendo autorizacion de Google para continuar...");
-        setConnectionLog("Solicitando inicio de sesión Administrador Google...");
-        const result = await signInWithPopup(auth, googleProvider);
-        currentUser = result.user;
-        setUser(result.user);
-        const cred = GoogleAuthProvider.credentialFromResult(result);
-        if (cred?.accessToken) {
-          setDriveToken(cred.accessToken);
-          sessionStorage.setItem("infrabim_drive_token", cred.accessToken);
+      let preparedDriveToken = driveToken || sessionStorage.getItem("infrabim_drive_token") || "";
+
+      if (!currentUser && auth) {
+        try {
+          setBulkPreparingMessage("Abriendo autorizacion de Google para continuar...");
+          setConnectionLog("Solicitando inicio de sesion Administrador Google...");
+          const result = await signInWithPopup(auth, googleProvider);
+          currentUser = result.user;
+          setUser(result.user);
+          const cred = GoogleAuthProvider.credentialFromResult(result);
+          if (cred?.accessToken) {
+            preparedDriveToken = cred.accessToken;
+            setDriveToken(cred.accessToken);
+            sessionStorage.setItem("infrabim_drive_token", cred.accessToken);
+          }
+        } catch (authErr: any) {
+          alert("Inicia sesion como Administrador para subir carpetas a Drive.");
+          return;
         }
-      } catch (authErr: any) {
-        alert("Inicia sesión como Administrador para subir carpetas a Drive.");
-        return;
       }
-    }
 
       setBulkPreparingMessage("Analizando estructura de carpetas...");
 
       const pathEntries = filesList.map((rawFile) => {
-      const file = rawFile as BulkUploadFile;
-      const originalPath = getBulkOriginalPath(file);
-      const parts = splitBulkPath(originalPath);
-      return { file, parts: parts.length > 0 ? parts : [file.name] };
-    });
+        const file = rawFile as BulkUploadFile;
+        const originalPath = getBulkOriginalPath(file);
+        const parts = splitBulkPath(originalPath);
+        return { file, parts: parts.length > 0 ? parts : [file.name] };
+      });
 
-    const firstLevelNames = Array.from(
-      new Set(pathEntries.filter((entry) => entry.parts.length >= 2).map((entry) => entry.parts[0]))
-    );
-    const singleRootName = firstLevelNames.length === 1 ? firstLevelNames[0] : "";
-    const hasFilesDirectlyInSingleRoot = Boolean(
-      singleRootName && pathEntries.some((entry) => entry.parts[0] === singleRootName && entry.parts.length === 2)
-    );
-    const secondLevelNames = singleRootName
-      ? new Set(
-          pathEntries
-            .filter((entry) => entry.parts[0] === singleRootName && entry.parts.length >= 3)
-            .map((entry) => entry.parts[1])
-        )
-      : new Set<string>();
-    const secondLevelList = Array.from(secondLevelNames);
-    const internalSecondLevelCount = secondLevelList.filter(isLikelyInternalAssetFolder).length;
-    const shouldUnwrapSingleRoot = Boolean(
-      singleRootName &&
-        !hasFilesDirectlyInSingleRoot &&
-        secondLevelList.length > 1 &&
-        internalSecondLevelCount < secondLevelList.length
-    );
+      const firstLevelNames = Array.from(
+        new Set(pathEntries.filter((entry) => entry.parts.length >= 2).map((entry) => entry.parts[0]))
+      );
+      const singleRootName = firstLevelNames.length === 1 ? firstLevelNames[0] : "";
+      const secondLevelNames = singleRootName
+        ? new Set(
+            pathEntries
+              .filter((entry) => entry.parts[0] === singleRootName && entry.parts.length >= 3)
+              .map((entry) => entry.parts[1])
+          )
+        : new Set<string>();
+      const secondLevelList = Array.from(secondLevelNames);
+      const internalSecondLevelCount = secondLevelList.filter(isLikelyInternalAssetFolder).length;
+      const shouldUnwrapSingleRoot = Boolean(
+        singleRootName &&
+          secondLevelList.length > 1 &&
+          internalSecondLevelCount < secondLevelList.length
+      );
+      let ignoredLooseFiles = 0;
 
-    const folderMap = new Map<string, { folderName: string; rootPath: string; files: BulkUploadFile[] }>();
+      const folderMap = new Map<string, { folderName: string; rootPath: string; files: BulkUploadFile[] }>();
 
-    for (const { file, parts } of pathEntries) {
-      let folderName = "";
-      let rootParts: string[] = [];
-      let relativeParts: string[] = [];
+      for (const { file, parts } of pathEntries) {
+        let folderName = "";
+        let rootParts: string[] = [];
+        let relativeParts: string[] = [];
 
-      if (parts.length >= 2) {
-        if (shouldUnwrapSingleRoot && parts.length >= 3) {
+        if (parts.length < 2) {
+          ignoredLooseFiles++;
+          continue;
+        }
+
+        if (shouldUnwrapSingleRoot) {
+          if (parts.length < 3) {
+            ignoredLooseFiles++;
+            continue;
+          }
+
           folderName = parts[1];
           rootParts = parts.slice(0, 2);
           relativeParts = parts.slice(2);
@@ -2787,53 +2816,56 @@ export default function App() {
           rootParts = parts.slice(0, 1);
           relativeParts = parts.slice(1);
         }
-      } else {
-        folderName = clean_product_name_js(file.name.replace(/\.[^/.]+$/, "")) || "General";
-        rootParts = [folderName];
-        relativeParts = [file.name];
+
+        const rootPath = normalizeBulkPath(rootParts.join("/")) || folderName;
+        const relativePath = normalizeBulkPath(relativeParts.join("/")) || file.name;
+        file.bulkRootPath = rootPath;
+        file.bulkRelativePath = relativePath;
+
+        const existing = folderMap.get(rootPath);
+        if (existing) {
+          existing.files.push(file);
+        } else {
+          folderMap.set(rootPath, { folderName, rootPath, files: [file] });
+        }
       }
 
-      const rootPath = normalizeBulkPath(rootParts.join("/")) || folderName;
-      const relativePath = normalizeBulkPath(relativeParts.join("/")) || file.name;
-      file.bulkRootPath = rootPath;
-      file.bulkRelativePath = relativePath;
-
-      const groupKey = rootPath;
-      const existing = folderMap.get(groupKey);
-      if (existing) {
-        existing.files.push(file);
-      } else {
-        folderMap.set(groupKey, { folderName, rootPath, files: [file] });
+      const folders = Array.from(folderMap.values());
+      if (folders.length === 0) {
+        alert("No se detectaron carpetas de recursos. Selecciona una carpeta raiz que contenga subcarpetas.");
+        return;
       }
-    }
 
-    const folders = Array.from(folderMap.values());
-    if (folders.length === 0) {
-      alert("No se detectaron carpetas de recursos.");
-      return;
-    }
+      if (ignoredLooseFiles > 0) {
+        setConnectionLog("Se ignoraron " + ignoredLooseFiles + " archivo(s) suelto(s). Solo se subiran carpetas.");
+        showToast("Se ignoraron " + ignoredLooseFiles + " archivo(s) suelto(s) de la raiz.", "info");
+      }
 
-      setBulkPreparingMessage(`Preparando lista de ${folders.length} carpeta(s) para subir...`);
+      setBulkPreparingMessage("Preparando " + folders.length + " carpeta(s) para subir a Google Drive...");
 
       const selectionItems: BulkFolderSelectionItem[] = folders.map((folder, idx) => {
-      const cleanName = clean_product_name_js(folder.folderName);
-      const fileNames = folder.files.map((f) => getBulkUploadRelativePath(f));
-      return {
-        id: `sel-${idx}-${folder.rootPath}`,
-        folderName: folder.folderName,
-        rootPath: folder.rootPath,
-        cleanName,
-        files: folder.files,
-        fileCount: folder.files.length,
-        category: detectCategoryInJS(folder.folderName, fileNames),
-        maker: detectMakerInJS(folder.folderName, fileNames),
-        formats: detectFormatsInJS(fileNames),
-        selected: true,
-      };
-    });
+        const cleanName = clean_product_name_js(folder.folderName);
+        const fileNames = folder.files.map((f) => getBulkUploadRelativePath(f));
+        const totalBytes = folder.files.reduce((sum, file) => sum + (file.size || 0), 0);
+        return {
+          id: "sel-" + idx + "-" + folder.rootPath,
+          folderName: folder.folderName,
+          rootPath: folder.rootPath,
+          cleanName,
+          files: folder.files,
+          fileCount: folder.files.length,
+          totalBytes,
+          category: detectCategoryInJS(folder.folderName, fileNames),
+          maker: detectMakerInJS(folder.folderName, fileNames),
+          formats: detectFormatsInJS(fileNames),
+          selected: true,
+        };
+      });
 
       setBulkSelectionItems(selectionItems);
-      setBulkSelectionModalOpen(true);
+      setBulkSelectionModalOpen(false);
+      showToast("Se detectaron " + selectionItems.length + " subcarpetas. Iniciando carga masiva a Google Drive...", "info");
+      await startUploadingSelectedFolders(selectionItems, preparedDriveToken);
     } finally {
       setBulkPreparingOpen(false);
       setBulkPreparingMessage("");
@@ -2854,12 +2886,13 @@ export default function App() {
     if (!currentDriveToken && auth) {
       try {
         setBulkPreparingMessage("Abriendo autorizacion de Google Drive...");
-        setConnectionLog("Solicitando autorización Google OAuth 2.0 para Google Drive...");
+        setConnectionLog("Solicitando autorizacion Google OAuth 2.0 para Google Drive...");
         const result = await signInWithPopup(auth, googleProvider);
         const credential = GoogleAuthProvider.credentialFromResult(result);
         currentDriveToken = credential?.accessToken || "";
         if (currentDriveToken) {
           setDriveToken(currentDriveToken);
+          sessionStorage.setItem("infrabim_drive_token", currentDriveToken);
         }
       } catch (popupErr: any) {
         console.warn("Popup OAuth error:", popupErr);
@@ -2869,18 +2902,23 @@ export default function App() {
     if (!currentDriveToken) {
       setBulkPreparingOpen(false);
       setBulkPreparingMessage("");
-      alert("🔒 Autorización de Google Drive requerida:\n\nHaz clic en el botón 'Autorizar Google Drive' en el modal para conectar la cuenta y subir los archivos.");
+      alert("Autorizacion de Google Drive requerida. Vuelve a seleccionar la carpeta raiz y autoriza la cuenta Google cuando aparezca la ventana.");
       return;
     }
 
-    setBulkPreparingMessage("Creando panel de progreso...");
+    sessionStorage.setItem("infrabim_drive_token", currentDriveToken);
+    setBulkPreparingMessage("Creando ventana de progreso...");
     setBulkSelectionModalOpen(false);
 
     const initialProgressList: BulkFolderProgressItem[] = itemsToUpload.map((item, idx) => ({
-      id: `bulk-${idx}-${item.folderName}`,
+      id: "bulk-" + idx + "-" + item.folderName,
       folderName: item.folderName,
       cleanName: item.cleanName,
       fileCount: item.fileCount,
+      totalBytes: item.totalBytes,
+      uploadedBytes: 0,
+      progress: 0,
+      currentFilePercent: 0,
       status: "pending",
       currentStep: "En espera...",
       processedFiles: 0,
@@ -2891,19 +2929,29 @@ export default function App() {
 
     setBulkProgressList(initialProgressList);
     setBulkOverallProgress(0);
+    setBulkProgressCollapsed(false);
     setBulkModalOpen(true);
     setBulkPreparingOpen(false);
     setBulkPreparingMessage("");
     setBusy("bulk-drive");
 
     const totalFilesCount = itemsToUpload.reduce((acc, i) => acc + i.fileCount, 0);
-    setConnectionLog(`Preparando subida a Google Drive de ${itemsToUpload.length} subcarpetas (${totalFilesCount} archivos)...`);
+    const totalUploadBytes = Math.max(
+      1,
+      itemsToUpload.reduce((acc, item) => acc + (item.totalBytes || item.files.reduce((sum, file) => sum + (file.size || 0), 0)), 0)
+    );
+    setConnectionLog("Preparando subida a Google Drive de " + itemsToUpload.length + " subcarpetas (" + totalFilesCount + " archivos, " + formatBulkBytes(totalUploadBytes) + ")...");
 
     try {
       let totalSuccess = 0;
-      let globalFilesUploaded = 0;
-      const envRootFolderId = import.meta.env.VITE_GOOGLE_DRIVE_ROOT_FOLDER_ID || undefined;
+      let globalUploadedBytes = 0;
+      const envRootFolderId = import.meta.env.VITE_GOOGLE_DRIVE_ROOT_FOLDER_ID || DEFAULT_GOOGLE_DRIVE_ROOT_FOLDER_ID;
       const driveFolderPathCache = new Map<string, string>();
+
+      const updateOverallProgress = (inFlightBytes = 0) => {
+        const percent = Math.min(99, Math.round(((globalUploadedBytes + inFlightBytes) / totalUploadBytes) * 100));
+        setBulkOverallProgress(percent);
+      };
 
       async function refreshDriveTokenForBulk(): Promise<void> {
         if (!auth) {
@@ -2941,14 +2989,15 @@ export default function App() {
         fileName: string,
         mimeType: string,
         file: File,
-        parentFolderId: string
+        parentFolderId: string,
+        options?: { onProgress?: (progress: { loaded: number; total: number; percent: number }) => void }
       ): Promise<{ id: string; name: string; webViewLink?: string; directUrl: string }> {
         try {
-          return await uploadFileToDriveClient(currentDriveToken, fileName, mimeType, file, parentFolderId);
+          return await uploadFileToDriveClient(currentDriveToken, fileName, mimeType, file, parentFolderId, options);
         } catch (err: any) {
           if (err?.message?.includes("401")) {
             await refreshDriveTokenForBulk();
-            return uploadFileToDriveClient(currentDriveToken, fileName, mimeType, file, parentFolderId);
+            return uploadFileToDriveClient(currentDriveToken, fileName, mimeType, file, parentFolderId, options);
           }
           throw err;
         }
@@ -2959,7 +3008,7 @@ export default function App() {
 
         for (const rawSegment of folderSegments) {
           const folderName = sanitizeDrivePathSegment(rawSegment);
-          const cacheKey = `${currentParentId}/${folderName.toLowerCase()}`;
+          const cacheKey = currentParentId + "/" + folderName.toLowerCase();
           const cachedFolderId = driveFolderPathCache.get(cacheKey);
           if (cachedFolderId) {
             currentParentId = cachedFolderId;
@@ -2977,23 +3026,42 @@ export default function App() {
       for (let fIdx = 0; fIdx < itemsToUpload.length; fIdx++) {
         const item = itemsToUpload[fIdx];
         const files = item.files;
+        const folderTotalBytes = Math.max(1, item.totalBytes || files.reduce((sum, file) => sum + (file.size || 0), 0));
+        let folderUploadedBytes = 0;
 
         setBulkProgressList((prev) =>
           prev.map((p, idx) =>
-            idx === fIdx ? { ...p, status: "uploading", currentStep: "Creando subcarpeta en Google Drive..." } : p
+            idx === fIdx
+              ? {
+                  ...p,
+                  status: "uploading",
+                  progress: Math.max(p.progress, 1),
+                  currentStep: "Creando subcarpeta en Google Drive...",
+                }
+              : p
           )
         );
 
         const cleanName = item.cleanName;
         const slug = slugify(cleanName);
-        const docId = `familias-${slug}`;
+        const docId = "familias-" + slug;
 
-        setConnectionLog(`[${fIdx + 1}/${itemsToUpload.length}] Creando subcarpeta en Google Drive: ${cleanName}...`);
+        setConnectionLog("[" + (fIdx + 1) + "/" + itemsToUpload.length + "] Creando subcarpeta en Google Drive: " + cleanName + "...");
 
         try {
-          const driveFolder = await createDriveFolderForBulk(
-            `${cleanName} - ${slug}`,
-            envRootFolderId
+          const driveFolder = await createDriveFolderForBulk(cleanName + " - " + slug, envRootFolderId);
+
+          setBulkProgressList((prev) =>
+            prev.map((p, idx) =>
+              idx === fIdx
+                ? {
+                    ...p,
+                    progress: Math.max(p.progress, 3),
+                    driveFolderLink: driveFolder.webViewLink || "https://drive.google.com/drive/folders/" + driveFolder.id,
+                    currentStep: "Subcarpeta creada. Iniciando archivos...",
+                  }
+                : p
+            )
           );
 
           const uploadedImages: string[] = [];
@@ -3004,37 +3072,94 @@ export default function App() {
           for (let i = 0; i < files.length; i++) {
             const file = files[i];
             const relativePath = getBulkUploadRelativePath(file);
+            const relativeParts = splitBulkPath(relativePath);
+            const uploadFileName = relativeParts[relativeParts.length - 1] || file.name;
+            const nestedFolderParts = relativeParts.slice(0, -1);
+            const fileSize = file.size || 0;
+            let lastProgressUpdate = 0;
+
+            const pushFolderProgress = (loadedForCurrentFile: number, force = false) => {
+              const now = Date.now();
+              if (!force && now - lastProgressUpdate < 140) return;
+              lastProgressUpdate = now;
+
+              const safeLoaded = Math.max(0, Math.min(fileSize || loadedForCurrentFile, loadedForCurrentFile));
+              const inFlightFolderBytes = Math.min(folderTotalBytes, folderUploadedBytes + safeLoaded);
+              const bytePercent = Math.round((inFlightFolderBytes / folderTotalBytes) * 100);
+              const filePercent = Math.round(((i + (fileSize ? safeLoaded / Math.max(1, fileSize) : 0)) / Math.max(1, files.length)) * 100);
+              const folderPercent = Math.min(99, Math.max(bytePercent, filePercent, 3));
+
+              setBulkProgressList((prev) =>
+                prev.map((p, idx) =>
+                  idx === fIdx
+                    ? {
+                        ...p,
+                        status: "uploading",
+                        processedFiles: i,
+                        uploadedBytes: inFlightFolderBytes,
+                        progress: folderPercent,
+                        currentFilePercent: fileSize ? Math.min(99, Math.round((safeLoaded / Math.max(1, fileSize)) * 100)) : undefined,
+                        currentStep: "Subiendo (" + (i + 1) + "/" + files.length + "): " + relativePath,
+                      }
+                    : p
+                )
+              );
+              updateOverallProgress(safeLoaded);
+            };
 
             setBulkProgressList((prev) =>
               prev.map((p, idx) =>
                 idx === fIdx
                   ? {
                       ...p,
-                      processedFiles: i + 1,
-                      currentStep: `Subiendo a Drive (${i + 1}/${files.length}): ${relativePath}`,
+                      status: "uploading",
+                      processedFiles: i,
+                      currentFilePercent: 0,
+                      currentStep: "Subiendo (" + (i + 1) + "/" + files.length + "): " + relativePath,
                     }
                   : p
               )
             );
 
-            globalFilesUploaded++;
-            setBulkOverallProgress(Math.round((globalFilesUploaded / totalFilesCount) * 100));
-
-            setConnectionLog(`[${fIdx + 1}/${itemsToUpload.length}] Subiendo a Drive (${i + 1}/${files.length}): ${relativePath}...`);
+            setConnectionLog("[" + (fIdx + 1) + "/" + itemsToUpload.length + "] Subiendo a Drive (" + (i + 1) + "/" + files.length + "): " + relativePath + "...");
 
             try {
-              const relativeParts = splitBulkPath(relativePath);
-              const uploadFileName = relativeParts[relativeParts.length - 1] || file.name;
-              const nestedFolderParts = relativeParts.slice(0, -1);
               const targetFolderId = nestedFolderParts.length > 0
                 ? await ensureDriveFolderPath(driveFolder.id, nestedFolderParts)
                 : driveFolder.id;
+
               const res = await uploadFileForBulk(
                 uploadFileName,
                 file.type || "application/octet-stream",
                 file,
-                targetFolderId
+                targetFolderId,
+                {
+                  onProgress: (progress) => pushFolderProgress(progress.loaded, progress.percent >= 100),
+                }
               );
+
+              folderUploadedBytes = Math.min(folderTotalBytes, folderUploadedBytes + fileSize);
+              globalUploadedBytes = Math.min(totalUploadBytes, globalUploadedBytes + fileSize);
+              const completedFilePercent = Math.round(((i + 1) / Math.max(1, files.length)) * 100);
+              const completedBytePercent = Math.round((folderUploadedBytes / folderTotalBytes) * 100);
+              const completedPercent = Math.min(99, Math.max(completedFilePercent, completedBytePercent));
+
+              setBulkProgressList((prev) =>
+                prev.map((p, idx) =>
+                  idx === fIdx
+                    ? {
+                        ...p,
+                        processedFiles: i + 1,
+                        uploadedBytes: folderUploadedBytes,
+                        progress: completedPercent,
+                        currentFilePercent: 100,
+                        currentStep: "Archivo subido (" + (i + 1) + "/" + files.length + "): " + relativePath,
+                      }
+                    : p
+                )
+              );
+              updateOverallProgress(0);
+
               const lowerFileName = uploadFileName.toLowerCase();
 
               if (lowerFileName.endsWith(".glb") || lowerFileName.endsWith(".gltf")) {
@@ -3052,20 +3177,20 @@ export default function App() {
               }
             } catch (fileErr: any) {
               const fileMsg = fileErr?.message || String(fileErr);
-              fileErrors.push(`${relativePath}: ${fileMsg}`);
-              console.warn(`Error subiendo ${relativePath} a Drive:`, fileErr);
+              fileErrors.push(relativePath + ": " + fileMsg);
+              console.warn("Error subiendo " + relativePath + " a Drive:", fileErr);
             }
           }
 
           if (fileErrors.length > 0) {
-            throw new Error(`No se subieron ${fileErrors.length} archivo(s): ${fileErrors.slice(0, 3).join("; ")}`);
+            throw new Error("No se subieron " + fileErrors.length + " archivo(s): " + fileErrors.slice(0, 3).join("; "));
           }
 
           const payload: CatalogItemPayload = {
             id: docId,
             kind: "familias",
             slug,
-            route: `/familias/${slug}`,
+            route: "/familias/" + slug,
             name: cleanName,
             maker: item.maker,
             category: item.category,
@@ -3076,8 +3201,8 @@ export default function App() {
             price: "Gratis",
             downloads: "1.2K",
             tags: [item.maker, item.category, "BIM"],
-            specs: [`Archivos incluidos: ${item.formats.join(", ")}`, "Compatibilidad: Revit 2020-2026"],
-            description: `Familia BIM ${cleanName} de la marca ${item.maker} subida masivamente a Google Drive para Revit y OpenBIM.`,
+            specs: ["Archivos incluidos: " + item.formats.join(", "), "Compatibilidad: Revit 2020-2026"],
+            description: "Familia BIM " + cleanName + " de la marca " + item.maker + " subida masivamente a Google Drive para Revit y OpenBIM.",
             visual: "box",
             feature: "Nuevo",
             isPremium: false,
@@ -3087,7 +3212,7 @@ export default function App() {
             has3D: Boolean(uploadedGlbUrl),
             hasAR: Boolean(uploadedGlbUrl),
             driveFolderId: driveFolder.id,
-            driveFolderLink: driveFolder.webViewLink || `https://drive.google.com/drive/folders/${driveFolder.id}`,
+            driveFolderLink: driveFolder.webViewLink || "https://drive.google.com/drive/folders/" + driveFolder.id,
             attachedFiles: uploadedAttached,
             ownerUid: user?.uid || "",
             isArchived: false,
@@ -3102,16 +3227,19 @@ export default function App() {
                 ? {
                     ...p,
                     status: "completed",
-                    currentStep: "✓ Publicado en Firestore y Google Drive",
-                    driveFolderLink: driveFolder.webViewLink || `https://drive.google.com/drive/folders/${driveFolder.id}`,
+                    progress: 100,
+                    uploadedBytes: item.totalBytes,
+                    currentFilePercent: 100,
+                    currentStep: "Publicado en Firestore y Google Drive",
+                    driveFolderLink: driveFolder.webViewLink || "https://drive.google.com/drive/folders/" + driveFolder.id,
                   }
                 : p
             )
           );
 
-          setConnectionLog(`✓ Subida completada (${totalSuccess}/${itemsToUpload.length}): ${cleanName}`);
+          setConnectionLog("Subida completada (" + totalSuccess + "/" + itemsToUpload.length + "): " + cleanName);
         } catch (folderErr: any) {
-          console.error(`Error procesando subcarpeta ${cleanName}:`, folderErr);
+          console.error("Error procesando subcarpeta " + cleanName + ":", folderErr);
           const fMsg = folderErr?.message || String(folderErr);
 
           setBulkProgressList((prev) =>
@@ -3120,7 +3248,8 @@ export default function App() {
                 ? {
                     ...p,
                     status: "error",
-                    currentStep: `❌ Error: ${fMsg}`,
+                    currentStep: "Error: " + fMsg,
+                    errorMessage: fMsg,
                   }
                 : p
             )
@@ -3129,7 +3258,7 @@ export default function App() {
       }
 
       setBulkOverallProgress(100);
-      setConnectionLog(`🎉 ¡Carga Masiva a Google Drive Finalizada! ${totalSuccess} de ${itemsToUpload.length} subcarpetas respaldadas y publicadas.`);
+      setConnectionLog("Carga masiva a Google Drive finalizada: " + totalSuccess + " de " + itemsToUpload.length + " subcarpetas respaldadas y publicadas.");
       await refreshCatalogItems();
     } catch (err: any) {
       console.error("Error global en Carga Masiva a Drive:", err);
@@ -3137,15 +3266,12 @@ export default function App() {
 
       if (msg.includes("NET_BLOCKED_BY_CLIENT") || msg.includes("Failed to fetch") || msg.includes("BLOCKED_BY_CLIENT")) {
         alert(
-          "⚠️ BLOQUEO DE NAVEGADOR DETECTADO (net::ERR_BLOCKED_BY_CLIENT):\n\n" +
-          "Microsoft Edge o una extensión (AdBlock / uBlock / Protección contra rastreo) ha bloqueado las peticiones de subida a Google Drive.\n\n" +
-          "💡 CÓMO SOLUCIONARLO EN 5 SEGUNDOS EN EDGE:\n" +
-          "1. Haz clic en el ícono de Candado/Escudo a la izquierda de la URL (infrabimss.web.app).\n" +
-          "2. Desactiva la 'Protección contra rastreo' (Tracking Prevention) o Pausa tu AdBlocker.\n" +
-          "3. Reintenta la subida de tus carpetas."
+          "BLOQUEO DE NAVEGADOR DETECTADO (net::ERR_BLOCKED_BY_CLIENT):\n\n" +
+          "Microsoft Edge o una extension ha bloqueado las peticiones de subida a Google Drive.\n\n" +
+          "Solucion: desactiva la proteccion contra rastreo o pausa el AdBlocker para infrabimss.web.app y reintenta."
         );
       } else {
-        alert(`Error en Carga Masiva a Drive: ${msg}`);
+        alert("Error en Carga Masiva a Drive: " + msg);
       }
     } finally {
       setBusy("");
@@ -4704,27 +4830,161 @@ export default function App() {
 
     const completedCount = bulkProgressList.filter((item) => item.status === "completed").length;
     const errorCount = bulkProgressList.filter((item) => item.status === "error").length;
+    const uploadingItem = bulkProgressList.find((item) => item.status === "uploading");
     const isFinished = (completedCount + errorCount) === bulkProgressList.length && bulkProgressList.length > 0;
     const hasErrors = errorCount > 0;
+    const totalBytes = bulkProgressList.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
+    const uploadedBytes = bulkProgressList.reduce((sum, item) => sum + Math.min(item.uploadedBytes || 0, item.totalBytes || 0), 0);
+    const overallLabel = isFinished
+      ? hasErrors
+        ? "Finalizada con errores"
+        : "Finalizada"
+      : uploadingItem
+        ? "Subiendo " + uploadingItem.cleanName
+        : "Preparando subida";
+
+    const renderFolderRow = (item: BulkFolderProgressItem, idx: number) => {
+      const itemPercent = item.status === "completed"
+        ? 100
+        : item.status === "pending"
+          ? 0
+          : Math.max(0, Math.min(99, item.progress || 0));
+      const rowTone = item.status === "completed"
+        ? "#10b981"
+        : item.status === "error"
+          ? "#ef4444"
+          : "var(--accent)";
+
+      return (
+        <div
+          key={item.id}
+          className={item.status === "uploading" ? "bulk-upload-row-active bulk-upload-folder-row" : "bulk-upload-folder-row"}
+          style={{
+            padding: "0.85rem 1rem",
+            borderRadius: "8px",
+            background: item.status === "uploading" ? "rgba(15, 104, 114, 0.08)" : "var(--surface-2)",
+            border: item.status === "completed"
+              ? "1px solid rgba(34, 197, 94, 0.4)"
+              : item.status === "uploading"
+                ? "1px solid var(--accent)"
+                : item.status === "error"
+                  ? "1px solid rgba(239, 68, 68, 0.4)"
+                  : "1px solid var(--line)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.55rem",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.65rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0 }}>
+              <Folder size={16} style={{ color: rowTone, flex: "0 0 auto" }} />
+              <span className="bulk-folder-name">
+                [{idx + 1}/{bulkProgressList.length}] {item.cleanName}
+              </span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", flex: "0 0 auto" }}>
+              {item.status === "uploading" && <span className="bulk-mini-spinner" aria-hidden="true" />}
+              <span className="bulk-folder-percent" style={{ color: rowTone }}>{itemPercent}%</span>
+            </div>
+          </div>
+
+          <div className="bulk-folder-progress-track" aria-hidden="true">
+            <div
+              className={item.status === "uploading" ? "bulk-folder-progress-fill is-animated" : "bulk-folder-progress-fill"}
+              style={{
+                width: itemPercent + "%",
+                background: item.status === "error" ? "#ef4444" : item.status === "completed" ? "#10b981" : "var(--accent-gradient)",
+              }}
+            />
+          </div>
+
+          <div className="bulk-folder-meta-line">
+            <span>{item.currentStep}</span>
+            <span>{item.processedFiles}/{item.fileCount} archivos · {formatBulkBytes(item.uploadedBytes || 0)} / {formatBulkBytes(item.totalBytes || 0)}</span>
+          </div>
+
+          {item.driveFolderLink && (
+            <a
+              href={item.driveFolderLink}
+              target="_blank"
+              rel="noreferrer"
+              className="bulk-drive-link"
+            >
+              <Folder size={13} /> Abrir subcarpeta en Google Drive
+            </a>
+          )}
+        </div>
+      );
+    };
+
+    if (bulkProgressCollapsed) {
+      return (
+        <div className="bulk-progress-floating" role="status" aria-live="polite">
+          <button
+            type="button"
+            className="bulk-floating-main"
+            onClick={() => setBulkProgressCollapsed(false)}
+            title="Expandir progreso de carga masiva"
+          >
+            <div className="bulk-upload-orbit" aria-hidden="true"><span /></div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <strong>{overallLabel}</strong>
+              <span>{completedCount}/{bulkProgressList.length} carpetas · {bulkOverallProgress}%</span>
+              <div className="bulk-floating-progress-track" aria-hidden="true">
+                <div style={{ width: bulkOverallProgress + "%" }} />
+              </div>
+            </div>
+            <ChevronRight size={18} />
+          </button>
+          {isFinished && (
+            <button
+              type="button"
+              className="bulk-floating-close"
+              onClick={() => setBulkModalOpen(false)}
+              title="Cerrar progreso"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
+      );
+    }
 
     return (
-      <div className="modal-overlay" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, backdropFilter: "blur(6px)" }}>
-        <div className="modal-card bulk-progress-modal" style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "16px", padding: "1.5rem", maxWidth: "820px", width: "94%", maxHeight: "90vh", display: "flex", flexDirection: "column", gap: "1rem", boxShadow: "var(--shadow)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <FolderKanban size={22} style={{ color: "var(--accent)" }} />
-              <div>
-                <h3 style={{ margin: 0, fontSize: "1.1rem" }}>Detalle de Carga Masiva a Google Drive</h3>
-                <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
-                  Sincronizando {bulkProgressList.length} subcarpetas de recursos con Google Drive y Firestore
+      <div className="modal-overlay bulk-progress-overlay" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, backdropFilter: "blur(6px)" }}>
+        <div className="modal-card bulk-progress-modal" style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "12px", padding: "1.2rem", maxWidth: "920px", width: "94%", maxHeight: "90vh", display: "flex", flexDirection: "column", gap: "1rem", boxShadow: "var(--shadow)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", minWidth: 0 }}>
+              <FolderKanban size={22} style={{ color: "var(--accent)", flex: "0 0 auto" }} />
+              <div style={{ minWidth: 0 }}>
+                <h3 style={{ margin: 0, fontSize: "1.05rem" }}>Carga masiva a Google Drive</h3>
+                <span style={{ fontSize: "0.8rem", color: "var(--muted)" }}>
+                  {overallLabel} · {bulkProgressList.length} subcarpetas · {formatBulkBytes(uploadedBytes)} / {formatBulkBytes(totalBytes)}
                 </span>
               </div>
             </div>
-            {isFinished && (
-              <button onClick={() => setBulkModalOpen(false)} type="button" style={{ background: "none", border: "none", color: "var(--ink)", cursor: "pointer", padding: "0.3rem" }}>
-                <X size={22} />
+            <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+              <button
+                onClick={() => setBulkProgressCollapsed(true)}
+                type="button"
+                className="icon-action-button"
+                title="Contraer progreso"
+                style={{ background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--ink)", cursor: "pointer", padding: "0.45rem", borderRadius: 8, display: "inline-flex" }}
+              >
+                <ChevronDown size={18} />
               </button>
-            )}
+              {isFinished && (
+                <button
+                  onClick={() => setBulkModalOpen(false)}
+                  type="button"
+                  className="icon-action-button"
+                  title="Cerrar progreso"
+                  style={{ background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--ink)", cursor: "pointer", padding: "0.45rem", borderRadius: 8, display: "inline-flex" }}
+                >
+                  <X size={18} />
+                </button>
+              )}
+            </div>
           </div>
 
           {!isFinished && (
@@ -4734,117 +4994,38 @@ export default function App() {
               </div>
               <div>
                 <strong>Subida activa a Google Drive</strong>
-                <span>Creando carpetas, enviando archivos y publicando en Firestore.</span>
+                <span>{uploadingItem ? uploadingItem.currentStep : "Preparando carpetas y archivos..."}</span>
               </div>
             </div>
           )}
 
-          {/* Barra de progreso global */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", fontWeight: 700 }}>
-              <span>Progreso Global ({completedCount}/{bulkProgressList.length} completadas{errorCount > 0 ? `, ${errorCount} con error` : ""})</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", fontWeight: 700, gap: "0.8rem" }}>
+              <span>Progreso global ({completedCount}/{bulkProgressList.length} completadas{errorCount > 0 ? ", " + errorCount + " con error" : ""})</span>
               <span>{bulkOverallProgress}%</span>
             </div>
-            <div style={{ width: "100%", height: "10px", background: "var(--surface-2)", borderRadius: "999px", overflow: "hidden", border: "1px solid var(--line)" }}>
+            <div className="bulk-global-progress-track" aria-hidden="true">
               <div
                 className={!isFinished ? "bulk-progress-bar-fill is-animated" : "bulk-progress-bar-fill"}
                 style={{
-                  width: `${bulkOverallProgress}%`,
-                  height: "100%",
+                  width: bulkOverallProgress + "%",
                   background: hasErrors && completedCount === 0 ? "#ef4444" : "var(--accent-gradient)",
-                  transition: "width 0.3s ease",
                 }}
               />
             </div>
           </div>
 
-          {/* Lista de subcarpetas en proceso / completadas */}
-          <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.6rem", paddingRight: "0.2rem" }}>
-            {bulkProgressList.map((item, idx) => (
-              <div
-                key={item.id}
-                className={item.status === "uploading" ? "bulk-upload-row-active" : undefined}
-                style={{
-                  padding: "0.85rem 1rem",
-                  borderRadius: "10px",
-                  background: item.status === "uploading" ? "rgba(15, 104, 114, 0.08)" : "var(--surface-2)",
-                  border: item.status === "completed"
-                    ? "1px solid rgba(34, 197, 94, 0.4)"
-                    : item.status === "uploading"
-                      ? "1px solid var(--accent)"
-                      : item.status === "error"
-                        ? "1px solid rgba(239, 68, 68, 0.4)"
-                        : "1px solid var(--line)",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "0.4rem",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontWeight: 700, fontSize: "0.9rem" }}>
-                    <Folder size={16} style={{ color: item.status === "completed" ? "#10b981" : item.status === "error" ? "#ef4444" : "var(--accent)" }} />
-                    <span>[{idx + 1}/{bulkProgressList.length}] {item.cleanName}</span>
-                    <span style={{ fontSize: "0.75rem", background: "var(--surface)", border: "1px solid var(--line)", padding: "2px 6px", borderRadius: 4, color: "var(--muted)" }}>
-                      {item.category} · {item.maker}
-                    </span>
-                  </div>
-
-                  {/* Badge de Estado */}
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                    {item.status === "pending" && (
-                      <span style={{ fontSize: "0.75rem", background: "var(--surface)", color: "var(--muted)", border: "1px solid var(--line)", padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
-                        En espera ⏳
-                      </span>
-                    )}
-                    {item.status === "uploading" && (
-                      <span style={{ fontSize: "0.75rem", background: "rgba(15, 104, 114, 0.2)", color: "var(--accent)", border: "1px solid var(--accent)", padding: "2px 8px", borderRadius: 6, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 5 }}>
-                        <span className="bulk-mini-spinner" aria-hidden="true" />
-                        Subiendo
-                      </span>
-                    )}
-                    {item.status === "completed" && (
-                      <span style={{ fontSize: "0.75rem", background: "rgba(34, 197, 94, 0.15)", color: "#10b981", border: "1px solid rgba(34, 197, 94, 0.4)", padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
-                        Completado ✓
-                      </span>
-                    )}
-                    {item.status === "error" && (
-                      <span style={{ fontSize: "0.75rem", background: "rgba(239, 68, 68, 0.15)", color: "#ef4444", border: "1px solid rgba(239, 68, 68, 0.4)", padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
-                        Error ❌
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Sub-paso e información técnica */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.8rem", color: item.status === "error" ? "#ef4444" : "var(--muted)" }}>
-                  <span>{item.currentStep}</span>
-                  <span>{item.processedFiles}/{item.fileCount} archivos</span>
-                </div>
-
-                {item.driveFolderLink && (
-                  <div style={{ marginTop: "0.2rem" }}>
-                    <a
-                      href={item.driveFolderLink}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ fontSize: "0.78rem", color: "var(--accent)", textDecoration: "none", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}
-                    >
-                      <Folder size={13} /> Abrir subcarpeta en Google Drive ↗
-                    </a>
-                  </div>
-                )}
-              </div>
-            ))}
+          <div className="bulk-progress-list">
+            {bulkProgressList.map((item, idx) => renderFolderRow(item, idx))}
           </div>
 
-          {/* Footer de Modal */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "0.5rem", borderTop: "1px solid var(--line)", flexWrap: "wrap", gap: "0.5rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "0.5rem", borderTop: "1px solid var(--line)", flexWrap: "wrap", gap: "0.6rem" }}>
             <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
               {isFinished
                 ? completedCount === bulkProgressList.length
-                  ? "✅ Carga masiva finalizada exitosamente."
-                  : `⚠️ Carga masiva completada con ${errorCount} errores.`
-                : "⏳ No cierres esta ventana mientras se suben los archivos a Google Drive..."}
+                  ? "Carga masiva finalizada exitosamente."
+                  : "Carga masiva finalizada con " + errorCount + " error(es)."
+                : "Puedes contraer esta ventana; la subida seguira activa."}
             </span>
 
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -4859,6 +5040,7 @@ export default function App() {
                       const freshToken = cred?.accessToken || "";
                       if (freshToken) {
                         setDriveToken(freshToken);
+                        sessionStorage.setItem("infrabim_drive_token", freshToken);
                         showToast("Google Drive reconectado exitosamente. Reintentando...", "success");
                         const remainingItems = bulkSelectionItems.filter((i) => {
                           const prog = bulkProgressList.find((p) => p.cleanName === i.cleanName);
@@ -4869,35 +5051,42 @@ export default function App() {
                         }
                       }
                     } catch (err: any) {
-                      alert(`Error al reconectar Google Drive: ${err.message || err}`);
+                      alert("Error al reconectar Google Drive: " + (err.message || err));
                     }
                   }}
                   style={{
-                    padding: "0.5rem 1rem",
+                    padding: "0.5rem 0.85rem",
                     borderRadius: 8,
                     background: "linear-gradient(135deg, #ef4444, #dc2626)",
                     color: "#fff",
                     border: "none",
                     fontWeight: 700,
-                    fontSize: "0.83rem",
+                    fontSize: "0.82rem",
                     cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
                     gap: "0.4rem",
-                    boxShadow: "var(--shadow)"
                   }}
                 >
-                  <Crown size={15} /> Reconectar Google Drive y Reintentar ({errorCount})
+                  <UploadCloud size={14} /> Reintentar errores
                 </button>
               )}
-
               {isFinished && (
                 <button
                   type="button"
                   onClick={() => setBulkModalOpen(false)}
-                  style={{ padding: "0.5rem 1.2rem", borderRadius: 8, background: "var(--accent-gradient)", color: "#fff", border: "none", fontWeight: 700, fontSize: "0.85rem", cursor: "pointer" }}
+                  style={{
+                    padding: "0.5rem 0.85rem",
+                    borderRadius: 8,
+                    background: "var(--accent)",
+                    color: "white",
+                    border: "none",
+                    fontWeight: 700,
+                    fontSize: "0.82rem",
+                    cursor: "pointer",
+                  }}
                 >
-                  Cerrar y Ver Catálogo
+                  Cerrar
                 </button>
               )}
             </div>
@@ -4906,7 +5095,6 @@ export default function App() {
       </div>
     );
   }
-
   function renderBulkSelectionModal() {
     if (!bulkSelectionModalOpen) return null;
 
@@ -5406,10 +5594,10 @@ export default function App() {
                 <FolderKanban size={26} style={{ color: "var(--accent)", flexShrink: 0 }} />
                 <div>
                   <strong style={{ fontSize: "0.92rem", display: "block" }}>
-                    🎯 Carga Masiva Multicarpeta a Google Drive
+                    Carga masiva desde D:\RECURSOS INFRABIM
                   </strong>
                   <span style={{ fontSize: "0.8rem", color: "var(--muted)" }}>
-                    Arrastra varias carpetas a la vez desde tu Explorador de Windows o usa los botones de selección múltiple.
+                    Selecciona la carpeta raíz; se subirán solo sus subcarpetas y se ignorarán archivos sueltos.
                   </span>
                 </div>
               </div>
@@ -5429,9 +5617,9 @@ export default function App() {
                     fontWeight: 700,
                     boxShadow: "var(--shadow)"
                   }}
-                  title="Seleccionar carpeta raíz o múltiples subcarpetas"
+                  title="Seleccionar la carpeta raíz D:\RECURSOS INFRABIM"
                 >
-                  <Folder size={15} /> Seleccionar Carpeta / Subcarpetas
+                  <Folder size={15} /> Seleccionar Carpeta Raíz
                   <input
                     type="file"
                     // @ts-ignore
@@ -5461,36 +5649,22 @@ export default function App() {
                       fontWeight: 700,
                       boxShadow: "var(--shadow)"
                     }}
-                    title="Abrir el selector nativo de directorio en Chrome con botón de Subir"
+                    title="Elegir D:\RECURSOS INFRABIM con el selector nativo"
                   >
-                    <FolderKanban size={15} /> Selector Nativo Chrome
+                    <FolderKanban size={15} /> Elegir carpeta raíz
                   </button>
                 )}
 
-                <label
+                <span
                   style={{
-                    padding: "0.55rem 0.9rem",
-                    borderRadius: "8px",
-                    background: "var(--accent-gradient)",
-                    color: "#fff",
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "0.4rem",
-                    fontSize: "0.82rem",
-                    fontWeight: 700,
-                    boxShadow: "var(--shadow)"
+                    fontSize: "0.78rem",
+                    color: "var(--muted)",
+                    maxWidth: "220px",
+                    lineHeight: 1.35,
                   }}
-                  title="Seleccionar múltiples archivos de distintas carpetas a la vez"
                 >
-                  <PackagePlus size={15} /> Seleccionar Varios Archivos
-                  <input
-                    type="file"
-                    multiple
-                    style={{ display: "none" }}
-                    onChange={handleImportBulkFolderToDrive}
-                  />
-                </label>
+                  Archivos sueltos en la raíz: ignorados
+                </span>
               </div>
             </div>
 

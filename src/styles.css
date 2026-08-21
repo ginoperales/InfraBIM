@@ -4931,3 +4931,200 @@ button:disabled {
     background-position: 180% 50%;
   }
 }
+
+
+.bulk-progress-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding-right: 0.2rem;
+  min-height: 220px;
+}
+
+.bulk-upload-folder-row {
+  min-width: 0;
+}
+
+.bulk-folder-name {
+  font-size: 0.9rem;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bulk-folder-percent {
+  min-width: 42px;
+  text-align: right;
+  font-size: 0.82rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.bulk-global-progress-track,
+.bulk-folder-progress-track,
+.bulk-floating-progress-track {
+  width: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.bulk-global-progress-track {
+  height: 10px;
+}
+
+.bulk-folder-progress-track {
+  height: 9px;
+}
+
+.bulk-floating-progress-track {
+  height: 6px;
+  margin-top: 0.35rem;
+}
+
+.bulk-global-progress-track > div,
+.bulk-folder-progress-fill,
+.bulk-floating-progress-track > div {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.24s ease;
+}
+
+.bulk-folder-progress-fill.is-animated {
+  background-size: 180% 100%;
+  animation: bulk-progress-flow 0.9s linear infinite;
+}
+
+.bulk-folder-meta-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  min-width: 0;
+}
+
+.bulk-folder-meta-line span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bulk-folder-meta-line span:last-child {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.bulk-drive-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: fit-content;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.bulk-progress-floating {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 10000;
+  display: flex;
+  align-items: stretch;
+  gap: 0.4rem;
+  max-width: min(420px, calc(100vw - 2rem));
+}
+
+.bulk-floating-main {
+  min-width: min(340px, calc(100vw - 4.8rem));
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 104, 114, 0.3);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  text-align: left;
+}
+
+.bulk-floating-main .bulk-upload-orbit {
+  --orbit-size: 34px;
+  border-width: 3px;
+}
+
+.bulk-floating-main strong,
+.bulk-floating-main span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bulk-floating-main strong {
+  font-size: 0.86rem;
+}
+
+.bulk-floating-main span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-top: 0.15rem;
+}
+
+.bulk-floating-close {
+  width: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 640px) {
+  .bulk-progress-modal {
+    width: 96vw !important;
+    max-height: 92vh !important;
+    padding: 1rem !important;
+  }
+
+  .bulk-progress-list {
+    min-height: 260px;
+  }
+
+  .bulk-folder-meta-line {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .bulk-folder-meta-line span:first-child {
+    white-space: normal;
+  }
+
+  .bulk-progress-floating {
+    right: 0.6rem;
+    bottom: 0.6rem;
+    max-width: calc(100vw - 1.2rem);
+  }
+
+  .bulk-floating-main {
+    min-width: 0;
+    flex: 1;
+  }
+}
