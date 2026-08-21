@@ -33,6 +33,7 @@ export const db: Firestore | null = firebaseApp ? getFirestore(firebaseApp) : nu
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.addScope(DRIVE_FILE_SCOPE);
+googleProvider.addScope("https://www.googleapis.com/auth/drive");
 googleProvider.setCustomParameters({
   prompt: "select_account",
 });

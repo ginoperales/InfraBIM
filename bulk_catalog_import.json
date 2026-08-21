@@ -1,0 +1,269 @@
+[
+  {
+    "id": "familias-blocco-chair",
+    "kind": "familias",
+    "slug": "blocco-chair",
+    "route": "/familias/blocco-chair",
+    "name": "BLOCCO Chair",
+    "maker": "Plank",
+    "category": "Mobiliario",
+    "discipline": "Mobiliario",
+    "country": "Peru",
+    "formats": [
+      "BOL",
+      "IFC",
+      "RFA",
+      "ZIP"
+    ],
+    "versions": [
+      "2026",
+      "2025",
+      "2024",
+      "2023"
+    ],
+    "price": "Gratis",
+    "downloads": "1.2K",
+    "tags": [
+      "Plank",
+      "Mobiliario",
+      "BIM"
+    ],
+    "specs": [
+      "Archivos incluidos: BOL, IFC, RFA, ZIP",
+      "Compatibilidad: Revit 2020-2026"
+    ],
+    "description": "Familia BIM BLOCCO Chair de la marca Plank parametrizada para flujos de trabajo en Revit y OpenBIM.",
+    "visual": "box",
+    "feature": "Nuevo",
+    "isPremium": false,
+    "imageUrl": "",
+    "has3D": false,
+    "hasAR": false,
+    "attachedFiles": [
+      {
+        "id": "file-blocco-chair-zip",
+        "name": "Blocco Chair.zip",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/BLOCCO chair/Blocco Chair.zip"
+      },
+      {
+        "id": "file-furniture-chairs-plank-blocco-chair-bol",
+        "name": "Furniture_Chairs_Plank_Blocco-Chair.bol",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/BLOCCO chair/Furniture_Chairs_Plank_Blocco-Chair.bol"
+      },
+      {
+        "id": "file-furniture-chairs-plank-blocco-chair-ifc",
+        "name": "Furniture_Chairs_Plank_Blocco-Chair.ifc",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/BLOCCO chair/Furniture_Chairs_Plank_Blocco-Chair.ifc"
+      },
+      {
+        "id": "file-furniture-chairs-plank-blocco-chair-rfa",
+        "name": "Furniture_Chairs_Plank_Blocco-Chair.rfa",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/BLOCCO chair/Furniture_Chairs_Plank_Blocco-Chair.rfa"
+      }
+    ],
+    "isArchived": false
+  },
+  {
+    "id": "familias-furniture-sofas-kokuyo-milo",
+    "kind": "familias",
+    "slug": "furniture-sofas-kokuyo-milo",
+    "route": "/familias/furniture-sofas-kokuyo-milo",
+    "name": "Furniture Sofas KOKUYO Milo",
+    "maker": "KOKUYO",
+    "category": "Mobiliario",
+    "discipline": "Mobiliario",
+    "country": "Peru",
+    "formats": [
+      "3DS MAX",
+      "DWG",
+      "EXE",
+      "FBX",
+      "PDF",
+      "RFA",
+      "SKP"
+    ],
+    "versions": [
+      "2026",
+      "2025",
+      "2024",
+      "2023"
+    ],
+    "price": "Gratis",
+    "downloads": "1.2K",
+    "tags": [
+      "KOKUYO",
+      "Mobiliario",
+      "BIM"
+    ],
+    "specs": [
+      "Archivos incluidos: 3DS MAX, DWG, EXE, FBX, PDF, RFA, SKP",
+      "Compatibilidad: Revit 2020-2026"
+    ],
+    "description": "Familia BIM Furniture Sofas KOKUYO Milo de la marca KOKUYO parametrizada para flujos de trabajo en Revit y OpenBIM.",
+    "visual": "box",
+    "feature": "Nuevo",
+    "isPremium": false,
+    "imageUrl": "",
+    "has3D": false,
+    "hasAR": false,
+    "attachedFiles": [
+      {
+        "id": "file-furniture-sofas-kokuyo-milo-rfa",
+        "name": "Furniture_Sofas_KOKUYO_Milo.rfa",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/Furniture Sofas KOKUYO Milo/Furniture_Sofas_KOKUYO_Milo.rfa"
+      },
+      {
+        "id": "file-kokuyo-lamex-exe",
+        "name": "KOKUYO_LAMEX.exe",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/Furniture Sofas KOKUYO Milo/KOKUYO_LAMEX.exe"
+      },
+      {
+        "id": "file-milo-1-seater-sofa-sm-fbx",
+        "name": "Milo 1-Seater Sofa_SM.FBX",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/Furniture Sofas KOKUYO Milo/Milo 1-Seater Sofa_SM.FBX"
+      },
+      {
+        "id": "file-milo-1-seater-sofa-sm-max",
+        "name": "Milo 1-Seater Sofa_SM.max",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/Furniture Sofas KOKUYO Milo/Milo 1-Seater Sofa_SM.max"
+      },
+      {
+        "id": "file-milo-1-seater-sofa-sm-skp",
+        "name": "Milo 1-Seater Sofa_SM.skp",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/Furniture Sofas KOKUYO Milo/Milo 1-Seater Sofa_SM.skp"
+      },
+      {
+        "id": "file-milo-2-seater-sofa-max",
+        "name": "Milo 2-Seater Sofa.max",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/Furniture Sofas KOKUYO Milo/Milo 2-Seater Sofa.max"
+      },
+      {
+        "id": "file-milo-3-seater-sofa-sm-fbx",
+        "name": "Milo 3-Seater Sofa_SM.FBX",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/Furniture Sofas KOKUYO Milo/Milo 3-Seater Sofa_SM.FBX"
+      },
+      {
+        "id": "file-milo-3-seater-sofa-sm-max",
+        "name": "Milo 3-Seater Sofa_SM.max",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/Furniture Sofas KOKUYO Milo/Milo 3-Seater Sofa_SM.max"
+      },
+      {
+        "id": "file-milo-3-seater-sofa-sm-skp",
+        "name": "Milo 3-Seater Sofa_SM.skp",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/Furniture Sofas KOKUYO Milo/Milo 3-Seater Sofa_SM.skp"
+      },
+      {
+        "id": "file-milo-1-seater-dwg",
+        "name": "Milo_1-seater.dwg",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/Furniture Sofas KOKUYO Milo/Milo_1-seater.dwg"
+      },
+      {
+        "id": "file-milo-2-seater-dwg",
+        "name": "Milo_2-seater.dwg",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/Furniture Sofas KOKUYO Milo/Milo_2-seater.dwg"
+      },
+      {
+        "id": "file-milo-2seat-2017-skp",
+        "name": "milo_2seat_2017.skp",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/Furniture Sofas KOKUYO Milo/milo_2seat_2017.skp"
+      },
+      {
+        "id": "file-milo-3-seater-dwg",
+        "name": "Milo_3-seater.dwg",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/Furniture Sofas KOKUYO Milo/Milo_3-seater.dwg"
+      },
+      {
+        "id": "file-sizza-infini-brochure-ec-2022-09-16-pdf",
+        "name": "Sizza_Infini_Brochure_EC_(2022_09)_16.pdf",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/Furniture Sofas KOKUYO Milo/Sizza_Infini_Brochure_EC_(2022_09)_16.pdf"
+      }
+    ],
+    "isArchived": false
+  },
+  {
+    "id": "familias-monza-table-rectangular-73cm-high",
+    "kind": "familias",
+    "slug": "monza-table-rectangular-73cm-high",
+    "route": "/familias/monza-table-rectangular-73cm-high",
+    "name": "MONZA Table Rectangular - 73cm High",
+    "maker": "Plank",
+    "category": "Mobiliario",
+    "discipline": "Mobiliario",
+    "country": "Peru",
+    "formats": [
+      "BOL",
+      "IFC",
+      "RFA",
+      "ZIP"
+    ],
+    "versions": [
+      "2026",
+      "2025",
+      "2024",
+      "2023"
+    ],
+    "price": "Gratis",
+    "downloads": "1.2K",
+    "tags": [
+      "Plank",
+      "Mobiliario",
+      "BIM"
+    ],
+    "specs": [
+      "Archivos incluidos: BOL, IFC, RFA, ZIP",
+      "Compatibilidad: Revit 2020-2026"
+    ],
+    "description": "Familia BIM MONZA Table Rectangular - 73cm High de la marca Plank parametrizada para flujos de trabajo en Revit y OpenBIM.",
+    "visual": "box",
+    "feature": "Nuevo",
+    "isPremium": false,
+    "imageUrl": "",
+    "has3D": false,
+    "hasAR": false,
+    "attachedFiles": [
+      {
+        "id": "file-furniture-tables-plank-monza-table-rectangular-h73-bol",
+        "name": "Furniture_Tables_Plank_Monza-Table-Rectangular-h73.bol",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/MONZA table rectangular - 73cm high/Furniture_Tables_Plank_Monza-Table-Rectangular-h73.bol"
+      },
+      {
+        "id": "file-furniture-tables-plank-monza-table-rectangular-h73-ifc",
+        "name": "Furniture_Tables_Plank_Monza-Table-Rectangular-h73.ifc",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/MONZA table rectangular - 73cm high/Furniture_Tables_Plank_Monza-Table-Rectangular-h73.ifc"
+      },
+      {
+        "id": "file-furniture-tables-plank-monza-table-rectangular-h73-rfa",
+        "name": "Furniture_Tables_Plank_Monza-Table-Rectangular-h73.rfa",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/MONZA table rectangular - 73cm high/Furniture_Tables_Plank_Monza-Table-Rectangular-h73.rfa"
+      },
+      {
+        "id": "file-monza-table-rectangular-h-73-zip",
+        "name": "Monza Table Rectangular h 73.zip",
+        "ownerUid": "bulk-script-admin",
+        "webViewLink": "file:///D:/RECURSOS INFRABIM/MONZA table rectangular - 73cm high/Monza Table Rectangular h 73.zip"
+      }
+    ],
+    "isArchived": false
+  }
+]

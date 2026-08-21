@@ -23,6 +23,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
+  CheckSquare,
   CookingPot,
   CreditCard,
   Crown,
@@ -62,6 +63,7 @@ import {
   Sun,
   Trash2,
   Trees,
+  Upload,
   UploadCloud,
   User2,
   Wrench,
@@ -101,7 +103,16 @@ import {
   type RoleKey,
   defaultPaymentPlansConfig,
 } from "./lib/firestore";
-import { createDriveFolderClient, listDriveFiles, uploadFileToDriveClient, uploadJsonToDrive, type DriveFile } from "./lib/googleDrive";
+import {
+  createDriveFolderClient,
+  deleteDriveFileClient,
+  listDriveFiles,
+  renameDriveFileClient,
+  uploadFileToDriveClient,
+  uploadJsonToDrive,
+  type DriveFile,
+} from "./lib/googleDrive";
+import { matchesBilingualSearch } from "./lib/bilingualSearch";
 import "./styles.css";
 
 type UploadFileItem = {
@@ -111,6 +122,12 @@ type UploadFileItem = {
   mimeType: string;
   previewUrl?: string;
   size: number;
+};
+
+type BulkUploadFile = File & {
+  relPath?: string;
+  bulkRootPath?: string;
+  bulkRelativePath?: string;
 };
 
 type Product = BimObjectPayload & {
@@ -168,6 +185,34 @@ type CatalogDraft = {
 };
 
 type CheckoutMethod = "card" | "yape";
+
+export interface BulkFolderProgressItem {
+  id: string;
+  folderName: string;
+  cleanName: string;
+  fileCount: number;
+  status: "pending" | "uploading" | "completed" | "error";
+  currentStep: string;
+  processedFiles: number;
+  category: string;
+  maker: string;
+  formats: string[];
+  driveFolderLink?: string;
+  errorMessage?: string;
+}
+
+export interface BulkFolderSelectionItem {
+  id: string;
+  folderName: string;
+  rootPath: string;
+  cleanName: string;
+  files: BulkUploadFile[];
+  fileCount: number;
+  category: string;
+  maker: string;
+  formats: string[];
+  selected: boolean;
+}
 
 type CheckoutState = {
   method: CheckoutMethod;
@@ -275,15 +320,16 @@ export const defaultMasterOptions: MasterOptions = {
   ],
   formats: [
     "RFA",
-    "RFA, IFC",
     "RVT",
-    "RVT, RFA",
     "IFC",
-    "IFC, DWG",
-    "RFA, SKP",
-    "PDF, DWG",
     "DWG",
     "SKP",
+    "GLB",
+    "PDF",
+    "ZIP",
+    "RAR",
+    "FBX",
+    "3DS MAX",
   ],
   versions: [
     "2026",
@@ -291,8 +337,8 @@ export const defaultMasterOptions: MasterOptions = {
     "2024",
     "2023",
     "2022",
-    "2026, 2025, 2024",
-    "Todas las versiones",
+    "2021",
+    "2020",
   ],
   tags: [
     "Cortafuegos",
@@ -1096,7 +1142,27 @@ export default function App() {
   const [masterOptions, setMasterOptions] = useState<MasterOptions>(() => {
     try {
       const saved = localStorage.getItem("infrabim_master_options");
-      return saved ? { ...defaultMasterOptions, ...JSON.parse(saved) } : defaultMasterOptions;
+      const base = saved ? { ...defaultMasterOptions, ...JSON.parse(saved) } : defaultMasterOptions;
+
+      const cleanWords = (arr: string[]) => {
+        const wordSet = new Set<string>();
+        (arr || []).forEach((item) => {
+          if (!item) return;
+          item.split(",").forEach((sub) => {
+            const trimmed = sub.trim();
+            if (trimmed) wordSet.add(trimmed);
+          });
+        });
+        return Array.from(wordSet);
+      };
+
+      return {
+        ...base,
+        formats: cleanWords(base.formats),
+        versions: cleanWords(base.versions),
+        tags: cleanWords(base.tags),
+        specs: cleanWords(base.specs),
+      };
     } catch {
       return defaultMasterOptions;
     }
@@ -1110,19 +1176,42 @@ export default function App() {
   const [masterActiveTab, setMasterActiveTab] = useState<keyof MasterOptions>("makers");
   const [newMasterOptionInput, setNewMasterOptionInput] = useState("");
 
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [bulkProgressList, setBulkProgressList] = useState<BulkFolderProgressItem[]>([]);
+  const [bulkOverallProgress, setBulkOverallProgress] = useState(0);
+  const [isDragOverBulk, setIsDragOverBulk] = useState(false);
+  const [bulkPreparingOpen, setBulkPreparingOpen] = useState(false);
+  const [bulkPreparingMessage, setBulkPreparingMessage] = useState("");
+
+  const [bulkSelectionModalOpen, setBulkSelectionModalOpen] = useState(false);
+  const [bulkSelectionItems, setBulkSelectionItems] = useState<BulkFolderSelectionItem[]>([]);
+
   function addMasterOption(fieldKey: keyof MasterOptions, optionValue: string) {
-    const val = optionValue.trim();
-    if (!val) return;
-    if (masterOptions[fieldKey].includes(val)) {
-      showToast(`La opción '${val}' ya existe en la lista`, "info");
+    const raw = optionValue.trim();
+    if (!raw) return;
+
+    const words = raw.split(",").map((w) => w.trim()).filter(Boolean);
+    const existing = new Set(masterOptions[fieldKey] || []);
+    let addedCount = 0;
+
+    for (const word of words) {
+      if (!existing.has(word)) {
+        existing.add(word);
+        addedCount++;
+      }
+    }
+
+    if (addedCount === 0) {
+      showToast(`Las opciones ya existen en la lista`, "info");
       return;
     }
+
     const updated = {
       ...masterOptions,
-      [fieldKey]: [...masterOptions[fieldKey], val],
+      [fieldKey]: Array.from(existing),
     };
     setMasterOptions(updated);
-    showToast(`Opción '${val}' agregada a la lista`, "success");
+    showToast(`Se agregó ${addedCount} opción(es) a la lista`, "success");
   }
 
   function editMasterOption(fieldKey: keyof MasterOptions, oldVal: string) {
@@ -1145,6 +1234,101 @@ export default function App() {
     };
     setMasterOptions(updated);
     showToast(`Opción '${valToDelete}' eliminada`, "info");
+  }
+
+  function renderMultiSelectField(
+    label: string,
+    fieldKey: keyof MasterOptions,
+    currentValue: string,
+    onChangeValue: (val: string) => void
+  ) {
+    const masterList = masterOptions[fieldKey] || [];
+    const selectedWords = new Set(
+      currentValue
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+
+    const allOptions = Array.from(new Set([...masterList, ...Array.from(selectedWords)]));
+
+    const toggleWord = (word: string) => {
+      const nextSet = new Set(selectedWords);
+      if (nextSet.has(word)) {
+        nextSet.delete(word);
+      } else {
+        nextSet.add(word);
+      }
+      onChangeValue(Array.from(nextSet).join(", "));
+    };
+
+    return (
+      <div className="wide-field" style={{ display: "flex", flexDirection: "column", gap: "0.35rem", marginBottom: "0.5rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontWeight: 700, fontSize: "0.85rem", color: "var(--ink)" }}>
+            {label} <small style={{ color: "var(--muted)", fontWeight: 500 }}>(Selección múltiple)</small>
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const newWord = prompt(`Agregar nuevo ${label.toLowerCase()} (palabra individual, ej: RAR):`);
+              if (newWord && newWord.trim()) {
+                const words = newWord.split(",").map((w) => w.trim()).filter(Boolean);
+                for (const w of words) {
+                  addMasterOption(fieldKey, w);
+                }
+                const nextSet = new Set([...Array.from(selectedWords), ...words]);
+                onChangeValue(Array.from(nextSet).join(", "));
+              }
+            }}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--accent)",
+              fontSize: "0.78rem",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            + Agregar palabra
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", background: "var(--surface-2)", padding: "0.55rem", borderRadius: "10px", border: "1px solid var(--line)" }}>
+          {allOptions.length === 0 ? (
+            <span style={{ fontSize: "0.78rem", color: "var(--muted)" }}>Sin palabras registradas. Haz clic en "+ Agregar palabra".</span>
+          ) : (
+            allOptions.map((word) => {
+              const isSelected = selectedWords.has(word);
+              return (
+                <button
+                  key={word}
+                  type="button"
+                  onClick={() => toggleWord(word)}
+                  style={{
+                    padding: "0.3rem 0.65rem",
+                    borderRadius: "6px",
+                    border: isSelected ? "1px solid var(--accent)" : "1px solid var(--line)",
+                    background: isSelected ? "var(--accent-gradient)" : "var(--surface)",
+                    color: isSelected ? "#ffffff" : "var(--ink)",
+                    fontSize: "0.78rem",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.3rem",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  <span>{isSelected ? "✓" : "+"}</span>
+                  <span>{word}</span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
   }
 
   function renderDynamicSelectField(
@@ -1229,7 +1413,26 @@ export default function App() {
   const [checkoutStatus, setCheckoutStatus] = useState("");
   const [yapeDraft, setYapeDraft] = useState({ otp: "", phoneNumber: "" });
   const [route, setRoute] = useState(() => normalizeRoute(window.location.pathname));
-  const [driveToken, setDriveToken] = useState("");
+  const [driveToken, setDriveToken] = useState<string>(() => {
+    const savedToken = sessionStorage.getItem("infrabim_drive_token") || "";
+    const savedTime = Number(sessionStorage.getItem("infrabim_drive_token_time") || "0");
+    if (savedToken && savedTime && Date.now() - savedTime > 50 * 60 * 1000) {
+      sessionStorage.removeItem("infrabim_drive_token");
+      sessionStorage.removeItem("infrabim_drive_token_time");
+      return "";
+    }
+    return savedToken;
+  });
+
+  useEffect(() => {
+    if (driveToken) {
+      sessionStorage.setItem("infrabim_drive_token", driveToken);
+      sessionStorage.setItem("infrabim_drive_token_time", String(Date.now()));
+    } else {
+      sessionStorage.removeItem("infrabim_drive_token");
+      sessionStorage.removeItem("infrabim_drive_token_time");
+    }
+  }, [driveToken]);
   const [driveFiles, setDriveFiles] = useState<DriveFile[]>([]);
   const [remoteObjects, setRemoteObjects] = useState<number | null>(null);
   const [paymentPlans, setPaymentPlans] = useState<PaymentPlansConfig>(defaultPaymentPlansConfig);
@@ -1269,11 +1472,6 @@ export default function App() {
   const isCatalogDetailPage = Boolean(activeRouteKind && routeSlug);
 
   const filteredProducts = useMemo(() => {
-    const terms = query
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((term) => term.length > 2);
-
     const matches = catalogItems.filter((product) => {
       const matchesKind = !activeRouteKind || product.kind === activeRouteKind;
       const matchesFilter = filter === "Todos" || product.discipline === filter || product.category === filter;
@@ -1284,19 +1482,20 @@ export default function App() {
         (selectedPricing === "Gratis" ? !product.isPremium : product.isPremium);
       const matchesFavorites = !onlyFavorites || favorites.includes(product.id);
 
-      const searchable = [
+      const searchableText = [
         product.name,
         product.maker,
         product.category,
         product.discipline,
         product.country,
+        product.description,
         ...product.tags,
         ...product.formats,
         ...product.versions,
-      ]
-        .join(" ")
-        .toLowerCase();
-      const matchesQuery = terms.length === 0 || terms.every((term) => searchable.includes(term));
+        ...(product.specs || []),
+      ].join(" ");
+
+      const matchesQuery = !query.trim() || matchesBilingualSearch(query, searchableText);
 
       return (
         matchesKind &&
@@ -1521,13 +1720,20 @@ export default function App() {
           : gestionarStatusFilter === "activos"
             ? !item.isArchived
             : Boolean(item.isArchived);
-      const searchLower = gestionarSearch.toLowerCase().trim();
-      const matchesSearch =
-        !searchLower ||
-        item.name.toLowerCase().includes(searchLower) ||
-        (item.maker && item.maker.toLowerCase().includes(searchLower)) ||
-        (item.category && item.category.toLowerCase().includes(searchLower)) ||
-        (item.discipline && item.discipline.toLowerCase().includes(searchLower));
+      const adminSearchableText = [
+        item.name,
+        item.maker,
+        item.category,
+        item.discipline,
+        item.country,
+        item.description,
+        ...(item.tags || []),
+        ...(item.formats || []),
+        ...(item.versions || []),
+        ...(item.specs || []),
+      ].join(" ");
+
+      const matchesSearch = !gestionarSearch.trim() || matchesBilingualSearch(gestionarSearch, adminSearchableText);
 
       return matchesKind && matchesStatus && matchesSearch;
     });
@@ -1587,14 +1793,64 @@ export default function App() {
   }
 
   async function handleDeleteCatalogItem(item: CatalogItemPayload) {
-    if (!window.confirm(`⚠️ ¿Estás seguro de ELIMINAR permanentemente el recurso "${item.name}"?\nEsta acción no se puede deshacer.`)) {
+    if (!window.confirm(`⚠️ ¿Estás seguro de ELIMINAR permanentemente el recurso "${item.name}" y sus archivos en Google Drive?\nEsta acción no se puede deshacer.`)) {
       return;
     }
     setBusy(`delete-${item.id}`);
+    setConnectionLog(`Eliminando "${item.name}" de Firestore y Google Drive...`);
+
     try {
+      let currentDriveToken = driveToken;
+      if (!currentDriveToken && auth) {
+        setConnectionLog("Solicitando permiso Google OAuth 2.0 para eliminar de Google Drive...");
+        try {
+          const result = await signInWithPopup(auth, googleProvider);
+          const credential = GoogleAuthProvider.credentialFromResult(result);
+          currentDriveToken = credential?.accessToken || "";
+          if (currentDriveToken) setDriveToken(currentDriveToken);
+        } catch (err) {
+          console.warn("OAuth cancelado:", err);
+        }
+      }
+
+      if (currentDriveToken) {
+        if (item.driveFolderId) {
+          setConnectionLog(`Eliminando subcarpeta de Google Drive ID '${item.driveFolderId}'...`);
+          try {
+            await deleteDriveFileClient(currentDriveToken, item.driveFolderId);
+            setConnectionLog(`✓ Subcarpeta de Google Drive eliminada.`);
+          } catch (driveErr) {
+            console.warn("No se pudo eliminar la subcarpeta principal de Drive:", driveErr);
+          }
+        }
+
+        if (item.attachedFiles && item.attachedFiles.length > 0) {
+          for (const f of item.attachedFiles) {
+            if (f.id && f.id !== item.driveFolderId && !f.id.startsWith("file-")) {
+              try {
+                await deleteDriveFileClient(currentDriveToken, f.id);
+              } catch (e) {
+                // ignore 404 if already deleted with folder
+              }
+            }
+          }
+        }
+
+        if (item.glbUrl) {
+          const fileIdMatch = item.glbUrl.match(/\/(?:d|drive-file)\/([a-zA-Z0-9_-]+)/);
+          if (fileIdMatch && fileIdMatch[1]) {
+            try {
+              await deleteDriveFileClient(currentDriveToken, fileIdMatch[1]);
+            } catch (e) {
+              // ignore if already deleted
+            }
+          }
+        }
+      }
+
       await deleteCatalogItem(item.kind, item.slug);
       await refreshCatalogItems();
-      setConnectionLog(`Recurso "${item.name}" eliminado de Firestore.`);
+      setConnectionLog(`✓ Recurso "${item.name}" y sus archivos en Google Drive eliminados correctamente.`);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "No se pudo eliminar el recurso.";
       alert(msg);
@@ -1957,6 +2213,115 @@ export default function App() {
     });
   }
 
+
+
+  async function handleDeleteExistingDriveFile(
+    fileId: string,
+    fileType: "image" | "glb" | "attached",
+    fileRefOrItem?: string | DriveFilePayload
+  ) {
+    if (!confirm("¿Seguro que deseas eliminar este archivo de Google Drive? Se borrará permanentemente.")) {
+      return;
+    }
+
+    let currentDriveToken = driveToken;
+    if (!currentDriveToken && auth) {
+      setConnectionLog("Solicitando permiso Google OAuth 2.0 para eliminar de Drive...");
+      try {
+        const result = await signInWithPopup(auth, googleProvider);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        currentDriveToken = credential?.accessToken || "";
+        if (currentDriveToken) setDriveToken(currentDriveToken);
+      } catch (err) {
+        console.warn("OAuth cancelado:", err);
+      }
+    }
+
+    if (fileId && currentDriveToken) {
+      setConnectionLog(`Eliminando archivo ID '${fileId}' de Google Drive...`);
+      try {
+        await deleteDriveFileClient(currentDriveToken, fileId);
+        setConnectionLog(`✓ Archivo eliminado exitosamente de Google Drive.`);
+      } catch (err: any) {
+        console.warn("Error eliminando de Google Drive:", err);
+      }
+    }
+
+    setCatalogDraft((prev) => {
+      if (fileType === "image") {
+        const updatedImages = (prev.existingImages || []).filter((url) => url !== fileRefOrItem && !url.includes(fileId));
+        return {
+          ...prev,
+          existingImages: updatedImages,
+          imageUrl: updatedImages[0] || "",
+        };
+      } else if (fileType === "glb") {
+        return {
+          ...prev,
+          existingGlbUrl: "",
+        };
+      } else {
+        const updatedAttached = (prev.existingAttachedFiles || []).filter(
+          (f) => f.id !== fileId && f !== fileRefOrItem
+        );
+        const autoFormats = detectFormatsFromFiles(prev.attachedFiles, prev.glbFile);
+        return {
+          ...prev,
+          existingAttachedFiles: updatedAttached,
+          formats: autoFormats || prev.formats,
+        };
+      }
+    });
+  }
+
+  async function handleRenameExistingDriveFile(
+    fileId: string,
+    currentName: string,
+    fileType: "attached" | "glb" | "image"
+  ) {
+    const newName = prompt("Ingresa el nuevo nombre para este archivo en Google Drive:", currentName);
+    if (!newName || newName.trim() === "" || newName.trim() === currentName) return;
+
+    let currentDriveToken = driveToken;
+    if (!currentDriveToken && auth) {
+      setConnectionLog("Solicitando permiso Google OAuth 2.0 para renombrar en Drive...");
+      try {
+        const result = await signInWithPopup(auth, googleProvider);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        currentDriveToken = credential?.accessToken || "";
+        if (currentDriveToken) setDriveToken(currentDriveToken);
+      } catch (err) {
+        console.warn("OAuth cancelado:", err);
+      }
+    }
+
+    if (fileId && currentDriveToken) {
+      setConnectionLog(`Renombrando archivo en Google Drive a "${newName.trim()}"...`);
+      try {
+        await renameDriveFileClient(currentDriveToken, fileId, newName.trim());
+        setConnectionLog(`✓ Archivo renombrado en Google Drive a "${newName.trim()}".`);
+      } catch (err: any) {
+        console.warn("Error renombrando en Google Drive:", err);
+      }
+    }
+
+    setCatalogDraft((prev) => {
+      if (fileType === "attached") {
+        const updatedAttached = (prev.existingAttachedFiles || []).map((f) => {
+          if (f.id === fileId) {
+            return { ...f, name: newName.trim() };
+          }
+          return f;
+        });
+        return {
+          ...prev,
+          existingAttachedFiles: updatedAttached,
+        };
+      }
+      return prev;
+    });
+  }
+
   async function createCatalogItem() {
     if (!user) {
       setConnectionLog("Inicia sesion para crear recursos.");
@@ -2147,6 +2512,711 @@ export default function App() {
     } finally {
       setBusy("");
     }
+  }
+
+  async function handleImportBulkJson(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setBusy("bulk-import");
+      setConnectionLog("Leyendo lote masivo de recursos...");
+      const text = await file.text();
+      const items: CatalogItemPayload[] = JSON.parse(text);
+
+      if (!Array.isArray(items) || items.length === 0) {
+        alert("El archivo no contiene un arreglo válido de recursos.");
+        return;
+      }
+
+      setConnectionLog(`Publicando ${items.length} recursos en Firestore...`);
+
+      let count = 0;
+      for (const rawItem of items) {
+        const item: CatalogItemPayload = {
+          ...rawItem,
+          formats: Array.isArray(rawItem.formats) ? rawItem.formats : splitList(String(rawItem.formats || "RFA, IFC")),
+          versions: Array.isArray(rawItem.versions) ? rawItem.versions : splitList(String(rawItem.versions || "2026")),
+          tags: Array.isArray(rawItem.tags) ? rawItem.tags : splitList(String(rawItem.tags || "")),
+          specs: Array.isArray(rawItem.specs) ? rawItem.specs : splitList(String(rawItem.specs || "")),
+          ownerUid: user?.uid || "admin",
+        };
+
+        await saveCatalogItem(item);
+        count++;
+        setConnectionLog(`Publicado (${count}/${items.length}): ${item.name}`);
+      }
+
+      setConnectionLog(`✅ ¡Carga Masiva Exitosa! Se publicaron ${count} recursos en Firestore.`);
+      alert(`¡Carga Masiva Completada! Se importaron ${count} familias BIM exitosamente.`);
+      await refreshCatalogItems();
+    } catch (err: any) {
+      console.error("Error importando lote JSON:", err);
+      alert(`Error al importar lote: ${err.message || err}`);
+    } finally {
+      setBusy("");
+      event.target.value = "";
+    }
+  }
+
+  function detectCategoryInJS(folderName: string, fileNames: string[]): string {
+    const combined = (folderName + " " + fileNames.join(" ")).toLowerCase();
+    if (combined.includes("silla") || combined.includes("chair") || combined.includes("sofa") || combined.includes("mesa") || combined.includes("table") || combined.includes("mueble")) return "Mobiliario";
+    if (combined.includes("puerta") || combined.includes("door")) return "Puertas";
+    if (combined.includes("ventana") || combined.includes("window")) return "Ventanas";
+    if (combined.includes("sanitario") || combined.includes("bano") || combined.includes("baño") || combined.includes("lavamano")) return "Sanitarios";
+    if (combined.includes("hvac") || combined.includes("aire") || combined.includes("difusor")) return "HVAC";
+    if (combined.includes("columna") || combined.includes("viga") || combined.includes("estructura")) return "Estructuras";
+    return "Arquitectura";
+  }
+
+  function detectMakerInJS(folderName: string, fileNames: string[]): string {
+    const combined = (folderName + " " + fileNames.join(" ")).toLowerCase();
+    if (combined.includes("kokuyo")) return "KOKUYO";
+    if (combined.includes("plank")) return "Plank";
+    if (combined.includes("steelbim")) return "SteelBIM";
+    if (combined.includes("modasa")) return "MODASA";
+    if (combined.includes("airtek")) return "AirTek";
+    return "InfraBIM";
+  }
+
+  function detectFormatsInJS(fileNames: string[]): string[] {
+    const extMap: Record<string, string> = {
+      ".rfa": "RFA", ".rvt": "RVT", ".ifc": "IFC", ".dwg": "DWG",
+      ".skp": "SKP", ".pdf": "PDF", ".glb": "GLB", ".gltf": "GLTF",
+      ".zip": "ZIP", ".rar": "RAR", ".7z": "ZIP", ".max": "3DS MAX",
+      ".fbx": "FBX", ".obj": "OBJ", ".nwd": "NWD", ".nwc": "NWC",
+    };
+    const formats = new Set<string>();
+    for (const name of fileNames) {
+      const ext = name.slice(name.lastIndexOf(".")).toLowerCase();
+      if (extMap[ext]) {
+        formats.add(extMap[ext]);
+      } else if (ext && ext.includes(".")) {
+        const cleanExt = ext.replace(".", "").toUpperCase();
+        if (cleanExt.length <= 6) formats.add(cleanExt);
+      }
+    }
+    return formats.size > 0 ? Array.from(formats) : ["RFA", "IFC"];
+  }
+
+  function clean_product_name_js(name: string): string {
+    const clean = name.replace(/_/g, " ").trim();
+    return clean.replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  function normalizeBulkPath(pathValue: string): string {
+    return pathValue
+      .split("\\")
+      .join("/")
+      .split("/")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join("/");
+  }
+
+  function splitBulkPath(pathValue: string): string[] {
+    const normalized = normalizeBulkPath(pathValue);
+    return normalized ? normalized.split("/") : [];
+  }
+
+  function getBulkOriginalPath(file: File): string {
+    const uploadFile = file as BulkUploadFile;
+    return normalizeBulkPath(file.webkitRelativePath || uploadFile.relPath || file.name);
+  }
+
+  function getBulkUploadRelativePath(file: File): string {
+    const uploadFile = file as BulkUploadFile;
+    return normalizeBulkPath(uploadFile.bulkRelativePath || file.name) || file.name;
+  }
+
+  function sanitizeDrivePathSegment(segment: string): string {
+    return segment.replace(/[\/:*?"<>|]/g, "_").trim().slice(0, 160) || "Carpeta";
+  }
+
+  function normalizeBulkFolderToken(name: string): string {
+    return name
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "");
+  }
+
+  function isLikelyInternalAssetFolder(name: string): boolean {
+    return new Set([
+      "3d",
+      "cad",
+      "docs",
+      "documents",
+      "documentos",
+      "dwg",
+      "familias",
+      "families",
+      "files",
+      "fuentes",
+      "glb",
+      "gltf",
+      "ifc",
+      "imagenes",
+      "images",
+      "img",
+      "maps",
+      "mapas",
+      "models",
+      "modelos",
+      "preview",
+      "previews",
+      "renders",
+      "revit",
+      "rfa",
+      "rvt",
+      "source",
+      "sources",
+      "texturas",
+      "texture",
+      "textures",
+    ]).has(normalizeBulkFolderToken(name));
+  }
+  async function scanDataTransferEntry(entry: any, path = ""): Promise<BulkUploadFile[]> {
+    const results: BulkUploadFile[] = [];
+    if (!entry) return results;
+
+    if (entry.isFile) {
+      const file = await new Promise<File>((resolve, reject) => entry.file(resolve, reject));
+      const uploadFile = file as BulkUploadFile;
+      const relPath = path ? `${path}/${file.name}` : file.name;
+      uploadFile.relPath = relPath;
+      results.push(uploadFile);
+    } else if (entry.isDirectory) {
+      const dirReader = entry.createReader();
+      const entries = await new Promise<any[]>((resolve) => {
+        const allEntries: any[] = [];
+        const readBatch = () => {
+          dirReader.readEntries((batch: any[]) => {
+            if (!batch || batch.length === 0) {
+              resolve(allEntries);
+            } else {
+              allEntries.push(...batch);
+              readBatch();
+            }
+          });
+        };
+        readBatch();
+      });
+
+      for (const childEntry of entries) {
+        const childFiles = await scanDataTransferEntry(childEntry, path ? `${path}/${entry.name}` : entry.name);
+        results.push(...childFiles);
+      }
+    }
+    return results;
+  }
+
+  async function processBulkFileList(filesList: File[]) {
+    if (filesList.length === 0) return;
+
+    setBulkPreparingOpen(true);
+    setBulkPreparingMessage(`Leyendo ${filesList.length} archivo(s) y detectando carpetas...`);
+
+    try {
+      let currentUser = user;
+    if (!currentUser && auth) {
+      try {
+        setBulkPreparingMessage("Abriendo autorizacion de Google para continuar...");
+        setConnectionLog("Solicitando inicio de sesión Administrador Google...");
+        const result = await signInWithPopup(auth, googleProvider);
+        currentUser = result.user;
+        setUser(result.user);
+        const cred = GoogleAuthProvider.credentialFromResult(result);
+        if (cred?.accessToken) {
+          setDriveToken(cred.accessToken);
+          sessionStorage.setItem("infrabim_drive_token", cred.accessToken);
+        }
+      } catch (authErr: any) {
+        alert("Inicia sesión como Administrador para subir carpetas a Drive.");
+        return;
+      }
+    }
+
+      setBulkPreparingMessage("Analizando estructura de carpetas...");
+
+      const pathEntries = filesList.map((rawFile) => {
+      const file = rawFile as BulkUploadFile;
+      const originalPath = getBulkOriginalPath(file);
+      const parts = splitBulkPath(originalPath);
+      return { file, parts: parts.length > 0 ? parts : [file.name] };
+    });
+
+    const firstLevelNames = Array.from(
+      new Set(pathEntries.filter((entry) => entry.parts.length >= 2).map((entry) => entry.parts[0]))
+    );
+    const singleRootName = firstLevelNames.length === 1 ? firstLevelNames[0] : "";
+    const hasFilesDirectlyInSingleRoot = Boolean(
+      singleRootName && pathEntries.some((entry) => entry.parts[0] === singleRootName && entry.parts.length === 2)
+    );
+    const secondLevelNames = singleRootName
+      ? new Set(
+          pathEntries
+            .filter((entry) => entry.parts[0] === singleRootName && entry.parts.length >= 3)
+            .map((entry) => entry.parts[1])
+        )
+      : new Set<string>();
+    const secondLevelList = Array.from(secondLevelNames);
+    const internalSecondLevelCount = secondLevelList.filter(isLikelyInternalAssetFolder).length;
+    const shouldUnwrapSingleRoot = Boolean(
+      singleRootName &&
+        !hasFilesDirectlyInSingleRoot &&
+        secondLevelList.length > 1 &&
+        internalSecondLevelCount < secondLevelList.length
+    );
+
+    const folderMap = new Map<string, { folderName: string; rootPath: string; files: BulkUploadFile[] }>();
+
+    for (const { file, parts } of pathEntries) {
+      let folderName = "";
+      let rootParts: string[] = [];
+      let relativeParts: string[] = [];
+
+      if (parts.length >= 2) {
+        if (shouldUnwrapSingleRoot && parts.length >= 3) {
+          folderName = parts[1];
+          rootParts = parts.slice(0, 2);
+          relativeParts = parts.slice(2);
+        } else {
+          folderName = parts[0];
+          rootParts = parts.slice(0, 1);
+          relativeParts = parts.slice(1);
+        }
+      } else {
+        folderName = clean_product_name_js(file.name.replace(/\.[^/.]+$/, "")) || "General";
+        rootParts = [folderName];
+        relativeParts = [file.name];
+      }
+
+      const rootPath = normalizeBulkPath(rootParts.join("/")) || folderName;
+      const relativePath = normalizeBulkPath(relativeParts.join("/")) || file.name;
+      file.bulkRootPath = rootPath;
+      file.bulkRelativePath = relativePath;
+
+      const groupKey = rootPath;
+      const existing = folderMap.get(groupKey);
+      if (existing) {
+        existing.files.push(file);
+      } else {
+        folderMap.set(groupKey, { folderName, rootPath, files: [file] });
+      }
+    }
+
+    const folders = Array.from(folderMap.values());
+    if (folders.length === 0) {
+      alert("No se detectaron carpetas de recursos.");
+      return;
+    }
+
+      setBulkPreparingMessage(`Preparando lista de ${folders.length} carpeta(s) para subir...`);
+
+      const selectionItems: BulkFolderSelectionItem[] = folders.map((folder, idx) => {
+      const cleanName = clean_product_name_js(folder.folderName);
+      const fileNames = folder.files.map((f) => getBulkUploadRelativePath(f));
+      return {
+        id: `sel-${idx}-${folder.rootPath}`,
+        folderName: folder.folderName,
+        rootPath: folder.rootPath,
+        cleanName,
+        files: folder.files,
+        fileCount: folder.files.length,
+        category: detectCategoryInJS(folder.folderName, fileNames),
+        maker: detectMakerInJS(folder.folderName, fileNames),
+        formats: detectFormatsInJS(fileNames),
+        selected: true,
+      };
+    });
+
+      setBulkSelectionItems(selectionItems);
+      setBulkSelectionModalOpen(true);
+    } finally {
+      setBulkPreparingOpen(false);
+      setBulkPreparingMessage("");
+    }
+  }
+
+  async function startUploadingSelectedFolders(itemsToUpload: BulkFolderSelectionItem[], overrideToken?: string) {
+    if (itemsToUpload.length === 0) {
+      alert("Selecciona al menos una subcarpeta para iniciar la carga.");
+      return;
+    }
+
+    let currentDriveToken = overrideToken || driveToken || sessionStorage.getItem("infrabim_drive_token") || "";
+
+    setBulkPreparingOpen(true);
+    setBulkPreparingMessage("Preparando subida a Google Drive...");
+
+    if (!currentDriveToken && auth) {
+      try {
+        setBulkPreparingMessage("Abriendo autorizacion de Google Drive...");
+        setConnectionLog("Solicitando autorización Google OAuth 2.0 para Google Drive...");
+        const result = await signInWithPopup(auth, googleProvider);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        currentDriveToken = credential?.accessToken || "";
+        if (currentDriveToken) {
+          setDriveToken(currentDriveToken);
+        }
+      } catch (popupErr: any) {
+        console.warn("Popup OAuth error:", popupErr);
+      }
+    }
+
+    if (!currentDriveToken) {
+      setBulkPreparingOpen(false);
+      setBulkPreparingMessage("");
+      alert("🔒 Autorización de Google Drive requerida:\n\nHaz clic en el botón 'Autorizar Google Drive' en el modal para conectar la cuenta y subir los archivos.");
+      return;
+    }
+
+    setBulkPreparingMessage("Creando panel de progreso...");
+    setBulkSelectionModalOpen(false);
+
+    const initialProgressList: BulkFolderProgressItem[] = itemsToUpload.map((item, idx) => ({
+      id: `bulk-${idx}-${item.folderName}`,
+      folderName: item.folderName,
+      cleanName: item.cleanName,
+      fileCount: item.fileCount,
+      status: "pending",
+      currentStep: "En espera...",
+      processedFiles: 0,
+      category: item.category,
+      maker: item.maker,
+      formats: item.formats,
+    }));
+
+    setBulkProgressList(initialProgressList);
+    setBulkOverallProgress(0);
+    setBulkModalOpen(true);
+    setBulkPreparingOpen(false);
+    setBulkPreparingMessage("");
+    setBusy("bulk-drive");
+
+    const totalFilesCount = itemsToUpload.reduce((acc, i) => acc + i.fileCount, 0);
+    setConnectionLog(`Preparando subida a Google Drive de ${itemsToUpload.length} subcarpetas (${totalFilesCount} archivos)...`);
+
+    try {
+      let totalSuccess = 0;
+      let globalFilesUploaded = 0;
+      const envRootFolderId = import.meta.env.VITE_GOOGLE_DRIVE_ROOT_FOLDER_ID || undefined;
+      const driveFolderPathCache = new Map<string, string>();
+
+      async function refreshDriveTokenForBulk(): Promise<void> {
+        if (!auth) {
+          throw new Error("Autorizacion de Google Drive expirada. Inicia sesion nuevamente.");
+        }
+
+        setConnectionLog("Token de Google Drive expirado. Solicitando nueva autorizacion OAuth...");
+        const result = await signInWithPopup(auth, googleProvider);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        if (!credential?.accessToken) {
+          throw new Error("No se obtuvo token Google OAuth 2.0. Reintenta la autorizacion de Drive.");
+        }
+
+        currentDriveToken = credential.accessToken;
+        setDriveToken(currentDriveToken);
+        sessionStorage.setItem("infrabim_drive_token", currentDriveToken);
+      }
+
+      async function createDriveFolderForBulk(
+        name: string,
+        parentFolderId?: string
+      ): Promise<{ id: string; name: string; webViewLink?: string }> {
+        try {
+          return await createDriveFolderClient(currentDriveToken, name, parentFolderId);
+        } catch (err: any) {
+          if (err?.message?.includes("401")) {
+            await refreshDriveTokenForBulk();
+            return createDriveFolderClient(currentDriveToken, name, parentFolderId);
+          }
+          throw err;
+        }
+      }
+
+      async function uploadFileForBulk(
+        fileName: string,
+        mimeType: string,
+        file: File,
+        parentFolderId: string
+      ): Promise<{ id: string; name: string; webViewLink?: string; directUrl: string }> {
+        try {
+          return await uploadFileToDriveClient(currentDriveToken, fileName, mimeType, file, parentFolderId);
+        } catch (err: any) {
+          if (err?.message?.includes("401")) {
+            await refreshDriveTokenForBulk();
+            return uploadFileToDriveClient(currentDriveToken, fileName, mimeType, file, parentFolderId);
+          }
+          throw err;
+        }
+      }
+
+      async function ensureDriveFolderPath(parentFolderId: string, folderSegments: string[]): Promise<string> {
+        let currentParentId = parentFolderId;
+
+        for (const rawSegment of folderSegments) {
+          const folderName = sanitizeDrivePathSegment(rawSegment);
+          const cacheKey = `${currentParentId}/${folderName.toLowerCase()}`;
+          const cachedFolderId = driveFolderPathCache.get(cacheKey);
+          if (cachedFolderId) {
+            currentParentId = cachedFolderId;
+            continue;
+          }
+
+          const folder = await createDriveFolderForBulk(folderName, currentParentId);
+          driveFolderPathCache.set(cacheKey, folder.id);
+          currentParentId = folder.id;
+        }
+
+        return currentParentId;
+      }
+
+      for (let fIdx = 0; fIdx < itemsToUpload.length; fIdx++) {
+        const item = itemsToUpload[fIdx];
+        const files = item.files;
+
+        setBulkProgressList((prev) =>
+          prev.map((p, idx) =>
+            idx === fIdx ? { ...p, status: "uploading", currentStep: "Creando subcarpeta en Google Drive..." } : p
+          )
+        );
+
+        const cleanName = item.cleanName;
+        const slug = slugify(cleanName);
+        const docId = `familias-${slug}`;
+
+        setConnectionLog(`[${fIdx + 1}/${itemsToUpload.length}] Creando subcarpeta en Google Drive: ${cleanName}...`);
+
+        try {
+          const driveFolder = await createDriveFolderForBulk(
+            `${cleanName} - ${slug}`,
+            envRootFolderId
+          );
+
+          const uploadedImages: string[] = [];
+          let uploadedGlbUrl = "";
+          const uploadedAttached: DriveFilePayload[] = [];
+          const fileErrors: string[] = [];
+
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const relativePath = getBulkUploadRelativePath(file);
+
+            setBulkProgressList((prev) =>
+              prev.map((p, idx) =>
+                idx === fIdx
+                  ? {
+                      ...p,
+                      processedFiles: i + 1,
+                      currentStep: `Subiendo a Drive (${i + 1}/${files.length}): ${relativePath}`,
+                    }
+                  : p
+              )
+            );
+
+            globalFilesUploaded++;
+            setBulkOverallProgress(Math.round((globalFilesUploaded / totalFilesCount) * 100));
+
+            setConnectionLog(`[${fIdx + 1}/${itemsToUpload.length}] Subiendo a Drive (${i + 1}/${files.length}): ${relativePath}...`);
+
+            try {
+              const relativeParts = splitBulkPath(relativePath);
+              const uploadFileName = relativeParts[relativeParts.length - 1] || file.name;
+              const nestedFolderParts = relativeParts.slice(0, -1);
+              const targetFolderId = nestedFolderParts.length > 0
+                ? await ensureDriveFolderPath(driveFolder.id, nestedFolderParts)
+                : driveFolder.id;
+              const res = await uploadFileForBulk(
+                uploadFileName,
+                file.type || "application/octet-stream",
+                file,
+                targetFolderId
+              );
+              const lowerFileName = uploadFileName.toLowerCase();
+
+              if (lowerFileName.endsWith(".glb") || lowerFileName.endsWith(".gltf")) {
+                uploadedGlbUrl = res.directUrl;
+              } else if (file.type?.startsWith("image/") || lowerFileName.match(/\.(png|jpg|jpeg|webp)$/i)) {
+                uploadedImages.push(res.directUrl);
+              } else {
+                uploadedAttached.push({
+                  id: res.id,
+                  name: relativePath,
+                  mimeType: file.type || "application/octet-stream",
+                  ownerUid: user?.uid || "",
+                  webViewLink: res.webViewLink || res.directUrl,
+                });
+              }
+            } catch (fileErr: any) {
+              const fileMsg = fileErr?.message || String(fileErr);
+              fileErrors.push(`${relativePath}: ${fileMsg}`);
+              console.warn(`Error subiendo ${relativePath} a Drive:`, fileErr);
+            }
+          }
+
+          if (fileErrors.length > 0) {
+            throw new Error(`No se subieron ${fileErrors.length} archivo(s): ${fileErrors.slice(0, 3).join("; ")}`);
+          }
+
+          const payload: CatalogItemPayload = {
+            id: docId,
+            kind: "familias",
+            slug,
+            route: `/familias/${slug}`,
+            name: cleanName,
+            maker: item.maker,
+            category: item.category,
+            discipline: item.category,
+            country: "Peru",
+            formats: item.formats,
+            versions: ["2026", "2025", "2024", "2023"],
+            price: "Gratis",
+            downloads: "1.2K",
+            tags: [item.maker, item.category, "BIM"],
+            specs: [`Archivos incluidos: ${item.formats.join(", ")}`, "Compatibilidad: Revit 2020-2026"],
+            description: `Familia BIM ${cleanName} de la marca ${item.maker} subida masivamente a Google Drive para Revit y OpenBIM.`,
+            visual: "box",
+            feature: "Nuevo",
+            isPremium: false,
+            imageUrl: uploadedImages[0] || "",
+            images: uploadedImages,
+            glbUrl: uploadedGlbUrl,
+            has3D: Boolean(uploadedGlbUrl),
+            hasAR: Boolean(uploadedGlbUrl),
+            driveFolderId: driveFolder.id,
+            driveFolderLink: driveFolder.webViewLink || `https://drive.google.com/drive/folders/${driveFolder.id}`,
+            attachedFiles: uploadedAttached,
+            ownerUid: user?.uid || "",
+            isArchived: false,
+          };
+
+          await saveCatalogItem(payload);
+          totalSuccess++;
+
+          setBulkProgressList((prev) =>
+            prev.map((p, idx) =>
+              idx === fIdx
+                ? {
+                    ...p,
+                    status: "completed",
+                    currentStep: "✓ Publicado en Firestore y Google Drive",
+                    driveFolderLink: driveFolder.webViewLink || `https://drive.google.com/drive/folders/${driveFolder.id}`,
+                  }
+                : p
+            )
+          );
+
+          setConnectionLog(`✓ Subida completada (${totalSuccess}/${itemsToUpload.length}): ${cleanName}`);
+        } catch (folderErr: any) {
+          console.error(`Error procesando subcarpeta ${cleanName}:`, folderErr);
+          const fMsg = folderErr?.message || String(folderErr);
+
+          setBulkProgressList((prev) =>
+            prev.map((p, idx) =>
+              idx === fIdx
+                ? {
+                    ...p,
+                    status: "error",
+                    currentStep: `❌ Error: ${fMsg}`,
+                  }
+                : p
+            )
+          );
+        }
+      }
+
+      setBulkOverallProgress(100);
+      setConnectionLog(`🎉 ¡Carga Masiva a Google Drive Finalizada! ${totalSuccess} de ${itemsToUpload.length} subcarpetas respaldadas y publicadas.`);
+      await refreshCatalogItems();
+    } catch (err: any) {
+      console.error("Error global en Carga Masiva a Drive:", err);
+      const msg = err?.message || String(err);
+
+      if (msg.includes("NET_BLOCKED_BY_CLIENT") || msg.includes("Failed to fetch") || msg.includes("BLOCKED_BY_CLIENT")) {
+        alert(
+          "⚠️ BLOQUEO DE NAVEGADOR DETECTADO (net::ERR_BLOCKED_BY_CLIENT):\n\n" +
+          "Microsoft Edge o una extensión (AdBlock / uBlock / Protección contra rastreo) ha bloqueado las peticiones de subida a Google Drive.\n\n" +
+          "💡 CÓMO SOLUCIONARLO EN 5 SEGUNDOS EN EDGE:\n" +
+          "1. Haz clic en el ícono de Candado/Escudo a la izquierda de la URL (infrabimss.web.app).\n" +
+          "2. Desactiva la 'Protección contra rastreo' (Tracking Prevention) o Pausa tu AdBlocker.\n" +
+          "3. Reintenta la subida de tus carpetas."
+        );
+      } else {
+        alert(`Error en Carga Masiva a Drive: ${msg}`);
+      }
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleShowDirectoryPicker() {
+    try {
+      if (typeof (window as any).showDirectoryPicker !== "function") {
+        alert("Tu navegador no soporta el selector nativo de directorio. Usa la zona de arrastrar y soltar.");
+        return;
+      }
+
+      const selectedFiles: BulkUploadFile[] = [];
+      const rootNameCounts = new Map<string, number>();
+
+      while (true) {
+        let handle: any;
+        try {
+          handle = await (window as any).showDirectoryPicker();
+        } catch (pickErr: any) {
+          if (pickErr?.name === "AbortError") {
+            break;
+          }
+          throw pickErr;
+        }
+
+        const duplicateCount = rootNameCounts.get(handle.name) || 0;
+        rootNameCounts.set(handle.name, duplicateCount + 1);
+        const rootName = duplicateCount === 0 ? handle.name : `${handle.name} (${duplicateCount + 1})`;
+        const files: BulkUploadFile[] = [];
+
+        async function readDir(dirHandle: any, path = "") {
+          for await (const entry of dirHandle.values()) {
+            if (entry.kind === "file") {
+              const file = (await entry.getFile()) as BulkUploadFile;
+              const relPath = path ? `${path}/${file.name}` : file.name;
+              file.relPath = relPath;
+              files.push(file);
+            } else if (entry.kind === "directory") {
+              await readDir(entry, path ? `${path}/${entry.name}` : entry.name);
+            }
+          }
+        }
+
+        await readDir(handle, rootName);
+        selectedFiles.push(...files);
+
+        const addAnother = window.confirm(
+          `Se agregaron ${files.length} archivo(s) de "${handle.name}". ¿Quieres seleccionar otra carpeta para la carga masiva?`
+        );
+        if (!addAnother) {
+          break;
+        }
+      }
+
+      if (selectedFiles.length > 0) {
+        await processBulkFileList(selectedFiles);
+      }
+    } catch (err: any) {
+      if (err.name !== "AbortError") {
+        console.error("Error en showDirectoryPicker:", err);
+      }
+    }
+  }
+
+  async function handleImportBulkFolderToDrive(event: React.ChangeEvent<HTMLInputElement>) {
+    const filesList = Array.from(event.target.files || []);
+    if (filesList.length === 0) return;
+    await processBulkFileList(filesList);
+    event.target.value = "";
   }
 
   function setCommonSearch(value: string) {
@@ -3607,6 +4677,462 @@ export default function App() {
     );
   }
 
+  function renderBulkPreparingModal() {
+    if (!bulkPreparingOpen) return null;
+
+    return (
+      <div className="modal-overlay" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000, backdropFilter: "blur(6px)" }}>
+        <div className="modal-card bulk-preparing-modal" style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "16px", padding: "1.5rem", width: "min(440px, 92vw)", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.9rem", boxShadow: "var(--shadow)", textAlign: "center" }}>
+          <div className="bulk-upload-orbit bulk-upload-orbit-large" aria-hidden="true">
+            <span />
+          </div>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "1.05rem" }}>Preparando carga a Google Drive</h3>
+            <p style={{ margin: "0.35rem 0 0", color: "var(--muted)", fontSize: "0.86rem" }}>
+              {bulkPreparingMessage || "Leyendo carpetas y preparando archivos..."}
+            </p>
+          </div>
+          <div className="bulk-indeterminate-bar" aria-hidden="true">
+            <span />
+          </div>
+        </div>
+      </div>
+    );
+  }
+  function renderBulkProgressModal() {
+    if (!bulkModalOpen) return null;
+
+    const completedCount = bulkProgressList.filter((item) => item.status === "completed").length;
+    const errorCount = bulkProgressList.filter((item) => item.status === "error").length;
+    const isFinished = (completedCount + errorCount) === bulkProgressList.length && bulkProgressList.length > 0;
+    const hasErrors = errorCount > 0;
+
+    return (
+      <div className="modal-overlay" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, backdropFilter: "blur(6px)" }}>
+        <div className="modal-card bulk-progress-modal" style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "16px", padding: "1.5rem", maxWidth: "820px", width: "94%", maxHeight: "90vh", display: "flex", flexDirection: "column", gap: "1rem", boxShadow: "var(--shadow)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <FolderKanban size={22} style={{ color: "var(--accent)" }} />
+              <div>
+                <h3 style={{ margin: 0, fontSize: "1.1rem" }}>Detalle de Carga Masiva a Google Drive</h3>
+                <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
+                  Sincronizando {bulkProgressList.length} subcarpetas de recursos con Google Drive y Firestore
+                </span>
+              </div>
+            </div>
+            {isFinished && (
+              <button onClick={() => setBulkModalOpen(false)} type="button" style={{ background: "none", border: "none", color: "var(--ink)", cursor: "pointer", padding: "0.3rem" }}>
+                <X size={22} />
+              </button>
+            )}
+          </div>
+
+          {!isFinished && (
+            <div className="bulk-upload-activity" role="status" aria-live="polite">
+              <div className="bulk-upload-orbit" aria-hidden="true">
+                <span />
+              </div>
+              <div>
+                <strong>Subida activa a Google Drive</strong>
+                <span>Creando carpetas, enviando archivos y publicando en Firestore.</span>
+              </div>
+            </div>
+          )}
+
+          {/* Barra de progreso global */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", fontWeight: 700 }}>
+              <span>Progreso Global ({completedCount}/{bulkProgressList.length} completadas{errorCount > 0 ? `, ${errorCount} con error` : ""})</span>
+              <span>{bulkOverallProgress}%</span>
+            </div>
+            <div style={{ width: "100%", height: "10px", background: "var(--surface-2)", borderRadius: "999px", overflow: "hidden", border: "1px solid var(--line)" }}>
+              <div
+                className={!isFinished ? "bulk-progress-bar-fill is-animated" : "bulk-progress-bar-fill"}
+                style={{
+                  width: `${bulkOverallProgress}%`,
+                  height: "100%",
+                  background: hasErrors && completedCount === 0 ? "#ef4444" : "var(--accent-gradient)",
+                  transition: "width 0.3s ease",
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Lista de subcarpetas en proceso / completadas */}
+          <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.6rem", paddingRight: "0.2rem" }}>
+            {bulkProgressList.map((item, idx) => (
+              <div
+                key={item.id}
+                className={item.status === "uploading" ? "bulk-upload-row-active" : undefined}
+                style={{
+                  padding: "0.85rem 1rem",
+                  borderRadius: "10px",
+                  background: item.status === "uploading" ? "rgba(15, 104, 114, 0.08)" : "var(--surface-2)",
+                  border: item.status === "completed"
+                    ? "1px solid rgba(34, 197, 94, 0.4)"
+                    : item.status === "uploading"
+                      ? "1px solid var(--accent)"
+                      : item.status === "error"
+                        ? "1px solid rgba(239, 68, 68, 0.4)"
+                        : "1px solid var(--line)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.4rem",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontWeight: 700, fontSize: "0.9rem" }}>
+                    <Folder size={16} style={{ color: item.status === "completed" ? "#10b981" : item.status === "error" ? "#ef4444" : "var(--accent)" }} />
+                    <span>[{idx + 1}/{bulkProgressList.length}] {item.cleanName}</span>
+                    <span style={{ fontSize: "0.75rem", background: "var(--surface)", border: "1px solid var(--line)", padding: "2px 6px", borderRadius: 4, color: "var(--muted)" }}>
+                      {item.category} · {item.maker}
+                    </span>
+                  </div>
+
+                  {/* Badge de Estado */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                    {item.status === "pending" && (
+                      <span style={{ fontSize: "0.75rem", background: "var(--surface)", color: "var(--muted)", border: "1px solid var(--line)", padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
+                        En espera ⏳
+                      </span>
+                    )}
+                    {item.status === "uploading" && (
+                      <span style={{ fontSize: "0.75rem", background: "rgba(15, 104, 114, 0.2)", color: "var(--accent)", border: "1px solid var(--accent)", padding: "2px 8px", borderRadius: 6, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 5 }}>
+                        <span className="bulk-mini-spinner" aria-hidden="true" />
+                        Subiendo
+                      </span>
+                    )}
+                    {item.status === "completed" && (
+                      <span style={{ fontSize: "0.75rem", background: "rgba(34, 197, 94, 0.15)", color: "#10b981", border: "1px solid rgba(34, 197, 94, 0.4)", padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
+                        Completado ✓
+                      </span>
+                    )}
+                    {item.status === "error" && (
+                      <span style={{ fontSize: "0.75rem", background: "rgba(239, 68, 68, 0.15)", color: "#ef4444", border: "1px solid rgba(239, 68, 68, 0.4)", padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
+                        Error ❌
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Sub-paso e información técnica */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.8rem", color: item.status === "error" ? "#ef4444" : "var(--muted)" }}>
+                  <span>{item.currentStep}</span>
+                  <span>{item.processedFiles}/{item.fileCount} archivos</span>
+                </div>
+
+                {item.driveFolderLink && (
+                  <div style={{ marginTop: "0.2rem" }}>
+                    <a
+                      href={item.driveFolderLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ fontSize: "0.78rem", color: "var(--accent)", textDecoration: "none", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}
+                    >
+                      <Folder size={13} /> Abrir subcarpeta en Google Drive ↗
+                    </a>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Footer de Modal */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "0.5rem", borderTop: "1px solid var(--line)", flexWrap: "wrap", gap: "0.5rem" }}>
+            <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
+              {isFinished
+                ? completedCount === bulkProgressList.length
+                  ? "✅ Carga masiva finalizada exitosamente."
+                  : `⚠️ Carga masiva completada con ${errorCount} errores.`
+                : "⏳ No cierres esta ventana mientras se suben los archivos a Google Drive..."}
+            </span>
+
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              {hasErrors && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!auth) return;
+                    try {
+                      const res = await signInWithPopup(auth, googleProvider);
+                      const cred = GoogleAuthProvider.credentialFromResult(res);
+                      const freshToken = cred?.accessToken || "";
+                      if (freshToken) {
+                        setDriveToken(freshToken);
+                        showToast("Google Drive reconectado exitosamente. Reintentando...", "success");
+                        const remainingItems = bulkSelectionItems.filter((i) => {
+                          const prog = bulkProgressList.find((p) => p.cleanName === i.cleanName);
+                          return !prog || prog.status === "error" || prog.status === "pending";
+                        });
+                        if (remainingItems.length > 0) {
+                          await startUploadingSelectedFolders(remainingItems, freshToken);
+                        }
+                      }
+                    } catch (err: any) {
+                      alert(`Error al reconectar Google Drive: ${err.message || err}`);
+                    }
+                  }}
+                  style={{
+                    padding: "0.5rem 1rem",
+                    borderRadius: 8,
+                    background: "linear-gradient(135deg, #ef4444, #dc2626)",
+                    color: "#fff",
+                    border: "none",
+                    fontWeight: 700,
+                    fontSize: "0.83rem",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.4rem",
+                    boxShadow: "var(--shadow)"
+                  }}
+                >
+                  <Crown size={15} /> Reconectar Google Drive y Reintentar ({errorCount})
+                </button>
+              )}
+
+              {isFinished && (
+                <button
+                  type="button"
+                  onClick={() => setBulkModalOpen(false)}
+                  style={{ padding: "0.5rem 1.2rem", borderRadius: 8, background: "var(--accent-gradient)", color: "#fff", border: "none", fontWeight: 700, fontSize: "0.85rem", cursor: "pointer" }}
+                >
+                  Cerrar y Ver Catálogo
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderBulkSelectionModal() {
+    if (!bulkSelectionModalOpen) return null;
+
+    const selectedCount = bulkSelectionItems.filter((i) => i.selected).length;
+    const totalFilesCount = bulkSelectionItems
+      .filter((i) => i.selected)
+      .reduce((acc, i) => acc + i.fileCount, 0);
+
+    const allSelected = selectedCount === bulkSelectionItems.length && bulkSelectionItems.length > 0;
+
+    function toggleSelectAll() {
+      const nextState = !allSelected;
+      setBulkSelectionItems((prev) => prev.map((item) => ({ ...item, selected: nextState })));
+    }
+
+    function toggleItem(id: string) {
+      setBulkSelectionItems((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, selected: !item.selected } : item))
+      );
+    }
+
+    return (
+      <div className="modal-overlay" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, backdropFilter: "blur(6px)" }}>
+        <div className="modal-card bulk-selection-modal" style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "16px", padding: "1.5rem", maxWidth: "820px", width: "94%", maxHeight: "88vh", display: "flex", flexDirection: "column", gap: "1rem", boxShadow: "var(--shadow)" }}>
+          
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <FolderKanban size={22} style={{ color: "var(--accent)" }} />
+              <div>
+                <h3 style={{ margin: 0, fontSize: "1.1rem" }}>Seleccionar Carpetas a Subir</h3>
+                <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
+                  Se detectaron {bulkSelectionItems.length} carpetas principales. Marca las que deseas subir a Google Drive.
+                </span>
+              </div>
+            </div>
+            <button onClick={() => setBulkSelectionModalOpen(false)} type="button" style={{ background: "none", border: "none", color: "var(--ink)", cursor: "pointer", padding: "0.3rem" }}>
+              <X size={22} />
+            </button>
+          </div>
+
+          {/* Tarjeta de Estado de Conexión Google Drive */}
+          <div style={{ padding: "0.6rem 0.8rem", borderRadius: "10px", background: driveToken ? "rgba(34, 197, 94, 0.08)" : "rgba(239, 68, 68, 0.08)", border: driveToken ? "1px solid rgba(34, 197, 94, 0.3)" : "1px solid rgba(239, 68, 68, 0.3)", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.83rem" }}>
+              {driveToken ? (
+                <span style={{ color: "#10b981", fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
+                  🟢 Conectado a Google Drive (OAuth Activo)
+                </span>
+              ) : (
+                <span style={{ color: "#ef4444", fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
+                  ⚠️ Conexión a Google Drive Requerida antes de subir
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!auth) return;
+                try {
+                  const res = await signInWithPopup(auth, googleProvider);
+                  const cred = GoogleAuthProvider.credentialFromResult(res);
+                  if (cred?.accessToken) {
+                    setDriveToken(cred.accessToken);
+                    showToast("Google Drive autorizado exitosamente", "success");
+                  }
+                } catch (err: any) {
+                  alert(`Error al conectar Google Drive: ${err.message || err}`);
+                }
+              }}
+              style={{
+                padding: "0.35rem 0.8rem",
+                borderRadius: 6,
+                background: driveToken ? "var(--surface-2)" : "linear-gradient(135deg, #2563eb, #7c3aed)",
+                color: driveToken ? "var(--ink)" : "#fff",
+                border: driveToken ? "1px solid var(--line)" : "none",
+                fontWeight: 700,
+                fontSize: "0.78rem",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.3rem"
+              }}
+            >
+              <Crown size={14} /> {driveToken ? "Reconectar / Cambiar Cuenta" : "Autorizar Google Drive (1-Click)"}
+            </button>
+          </div>
+
+          {/* Bar de Controles y Selección Rápida */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.6rem 0.8rem", background: "var(--surface-2)", borderRadius: "10px", border: "1px solid var(--line)" }}>
+            <button
+              type="button"
+              onClick={toggleSelectAll}
+              style={{ background: "none", border: "none", color: "var(--accent)", fontWeight: 700, fontSize: "0.85rem", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.4rem" }}
+            >
+              <CheckSquare size={16} />
+              {allSelected ? "Deseleccionar Todas" : "Seleccionar Todas"}
+            </button>
+            <span style={{ fontSize: "0.83rem", fontWeight: 700, color: "var(--ink)" }}>
+              {selectedCount} de {bulkSelectionItems.length} carpetas marcadas ({totalFilesCount} archivos)
+            </span>
+          </div>
+
+          {/* Lista de Subcarpetas Detectadas con Checkboxes */}
+          <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.5rem", paddingRight: "0.2rem" }}>
+            {bulkSelectionItems.map((item, idx) => (
+              <label
+                key={item.id}
+                style={{
+                  padding: "0.75rem 0.9rem",
+                  borderRadius: "10px",
+                  background: item.selected ? "rgba(15, 104, 114, 0.08)" : "var(--surface-2)",
+                  border: item.selected ? "1px solid var(--accent)" : "1px solid var(--line)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                  gap: "0.8rem",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "0.7rem" }}>
+                  <input
+                    type="checkbox"
+                    checked={item.selected}
+                    onChange={() => toggleItem(item.id)}
+                    style={{ width: "18px", height: "18px", accentColor: "var(--accent)", cursor: "pointer" }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: "0.88rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                      <Folder size={15} style={{ color: "var(--accent)" }} />
+                      <span>[{idx + 1}] {item.cleanName}</span>
+                    </div>
+                    <span style={{ fontSize: "0.76rem", color: "var(--muted)" }}>
+                      Ruta origen: <code>{item.rootPath}</code>
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <span style={{ fontSize: "0.75rem", background: "var(--surface)", border: "1px solid var(--line)", padding: "2px 8px", borderRadius: 4, color: "var(--muted)" }}>
+                    {item.category} · {item.maker}
+                  </span>
+                  <span style={{ fontSize: "0.75rem", background: "rgba(15, 104, 114, 0.15)", color: "var(--accent)", padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
+                    {item.fileCount} archivos
+                  </span>
+                </div>
+              </label>
+            ))}
+          </div>
+
+          {/* Footer de Modal con Botón de Inicio */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "0.6rem", borderTop: "1px solid var(--line)", flexWrap: "wrap", gap: "0.5rem" }}>
+            <button
+              type="button"
+              onClick={() => setBulkSelectionModalOpen(false)}
+              style={{ padding: "0.55rem 1rem", borderRadius: 8, background: "var(--surface-2)", color: "var(--ink)", border: "1px solid var(--line)", fontWeight: 600, fontSize: "0.85rem", cursor: "pointer" }}
+            >
+              Cancelar
+            </button>
+
+            {!driveToken ? (
+              <button
+                type="button"
+                disabled={selectedCount === 0}
+                onClick={async () => {
+                  if (!auth) return;
+                  try {
+                    const res = await signInWithPopup(auth, googleProvider);
+                    const cred = GoogleAuthProvider.credentialFromResult(res);
+                    const freshToken = cred?.accessToken || "";
+                    if (freshToken) {
+                      setDriveToken(freshToken);
+                      showToast("Google Drive conectado exitosamente", "success");
+                      await startUploadingSelectedFolders(bulkSelectionItems.filter((i) => i.selected), freshToken);
+                    } else {
+                      alert("No se obtuvo el token de Google Drive. Por favor reintenta.");
+                    }
+                  } catch (err: any) {
+                    alert(`Error de conexión con Google Drive: ${err.message || err}`);
+                  }
+                }}
+                style={{
+                  padding: "0.6rem 1.4rem",
+                  borderRadius: 8,
+                  background: selectedCount > 0 ? "linear-gradient(135deg, #2563eb, #7c3aed)" : "var(--line)",
+                  color: "#fff",
+                  border: "none",
+                  fontWeight: 700,
+                  fontSize: "0.9rem",
+                  cursor: selectedCount > 0 ? "pointer" : "not-allowed",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.4rem",
+                  boxShadow: "var(--shadow)"
+                }}
+              >
+                <Crown size={17} /> Autorizar Google Drive y Subir {selectedCount} Carpetas
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={selectedCount === 0}
+                onClick={() => startUploadingSelectedFolders(bulkSelectionItems.filter((i) => i.selected), driveToken)}
+                style={{
+                  padding: "0.6rem 1.4rem",
+                  borderRadius: 8,
+                  background: selectedCount > 0 ? "var(--accent-gradient)" : "var(--line)",
+                  color: "#fff",
+                  border: "none",
+                  fontWeight: 700,
+                  fontSize: "0.9rem",
+                  cursor: selectedCount > 0 ? "pointer" : "not-allowed",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.4rem",
+                  boxShadow: "var(--shadow)"
+                }}
+              >
+                <Upload size={17} /> Subir {selectedCount} Carpetas a Google Drive
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderAdminPage() {
     if (!user) {
       return (
@@ -3808,6 +5334,164 @@ export default function App() {
               >
                 <Database size={15} /> Cargar catálogo demo
               </button>
+              <label
+                style={{
+                  padding: "0.6rem 1rem",
+                  borderRadius: "8px",
+                  background: "var(--accent-gradient)",
+                  color: "#fff",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "0.4rem",
+                  fontSize: "0.85rem",
+                  fontWeight: 700,
+                  boxShadow: "var(--shadow)"
+                }}
+                title="Cargar masivamente recursos desde un archivo de lote JSON generado por el script"
+              >
+                <PackagePlus size={15} /> Importar Lote JSON
+                <input
+                  accept=".json"
+                  style={{ display: "none" }}
+                  type="file"
+                  onChange={handleImportBulkJson}
+                />
+              </label>
+            </div>
+
+            {/* Zona de Arrastre Multi-Carpeta y Selección Múltiple */}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragOverBulk(true);
+              }}
+              onDragLeave={() => setIsDragOverBulk(false)}
+              onDrop={async (e) => {
+                e.preventDefault();
+                setIsDragOverBulk(false);
+                const items = Array.from(e.dataTransfer.items || []);
+                if (items.length === 0) return;
+
+                const scannedFiles: File[] = [];
+                for (const item of items) {
+                  const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+                  if (entry) {
+                    const files = await scanDataTransferEntry(entry);
+                    scannedFiles.push(...files);
+                  }
+                }
+
+                if (scannedFiles.length > 0) {
+                  await processBulkFileList(scannedFiles);
+                } else if (e.dataTransfer.files.length > 0) {
+                  await processBulkFileList(Array.from(e.dataTransfer.files));
+                }
+              }}
+              style={{
+                border: isDragOverBulk ? "2px dashed var(--accent)" : "1px dashed var(--line)",
+                borderRadius: "12px",
+                padding: "1rem 1.2rem",
+                background: isDragOverBulk ? "rgba(15, 104, 114, 0.12)" : "var(--surface-2)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "1rem",
+                marginBottom: "1.5rem",
+                transition: "all 0.2s ease",
+                flexWrap: "wrap"
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "0.8rem" }}>
+                <FolderKanban size={26} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                <div>
+                  <strong style={{ fontSize: "0.92rem", display: "block" }}>
+                    🎯 Carga Masiva Multicarpeta a Google Drive
+                  </strong>
+                  <span style={{ fontSize: "0.8rem", color: "var(--muted)" }}>
+                    Arrastra varias carpetas a la vez desde tu Explorador de Windows o usa los botones de selección múltiple.
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
+                <label
+                  style={{
+                    padding: "0.55rem 0.9rem",
+                    borderRadius: "8px",
+                    background: "linear-gradient(135deg, #2563eb, #7c3aed)",
+                    color: "#fff",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.4rem",
+                    fontSize: "0.82rem",
+                    fontWeight: 700,
+                    boxShadow: "var(--shadow)"
+                  }}
+                  title="Seleccionar carpeta raíz o múltiples subcarpetas"
+                >
+                  <Folder size={15} /> Seleccionar Carpeta / Subcarpetas
+                  <input
+                    type="file"
+                    // @ts-ignore
+                    webkitdirectory=""
+                    directory=""
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={handleImportBulkFolderToDrive}
+                  />
+                </label>
+
+                {typeof (window as any).showDirectoryPicker === "function" && (
+                  <button
+                    type="button"
+                    onClick={handleShowDirectoryPicker}
+                    style={{
+                      padding: "0.55rem 0.9rem",
+                      borderRadius: "8px",
+                      background: "linear-gradient(135deg, #059669, #10b981)",
+                      color: "#fff",
+                      border: "none",
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.4rem",
+                      fontSize: "0.82rem",
+                      fontWeight: 700,
+                      boxShadow: "var(--shadow)"
+                    }}
+                    title="Abrir el selector nativo de directorio en Chrome con botón de Subir"
+                  >
+                    <FolderKanban size={15} /> Selector Nativo Chrome
+                  </button>
+                )}
+
+                <label
+                  style={{
+                    padding: "0.55rem 0.9rem",
+                    borderRadius: "8px",
+                    background: "var(--accent-gradient)",
+                    color: "#fff",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.4rem",
+                    fontSize: "0.82rem",
+                    fontWeight: 700,
+                    boxShadow: "var(--shadow)"
+                  }}
+                  title="Seleccionar múltiples archivos de distintas carpetas a la vez"
+                >
+                  <PackagePlus size={15} /> Seleccionar Varios Archivos
+                  <input
+                    type="file"
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={handleImportBulkFolderToDrive}
+                  />
+                </label>
+              </div>
             </div>
 
             {dbLoading.catalog ? (
@@ -4067,13 +5751,13 @@ export default function App() {
 
               {renderDynamicSelectField("País", "countries", catalogDraft.country, (v) => setCatalogDraft({ ...catalogDraft, country: v }))}
 
-              {renderDynamicSelectField("Formatos", "formats", catalogDraft.formats, (v) => setCatalogDraft({ ...catalogDraft, formats: v }))}
+              {renderMultiSelectField("Formatos", "formats", catalogDraft.formats, (v) => setCatalogDraft({ ...catalogDraft, formats: v }))}
 
-              {renderDynamicSelectField("Versiones", "versions", catalogDraft.versions, (v) => setCatalogDraft({ ...catalogDraft, versions: v }))}
+              {renderMultiSelectField("Versiones", "versions", catalogDraft.versions, (v) => setCatalogDraft({ ...catalogDraft, versions: v }))}
 
-              {renderDynamicSelectField("Etiquetas", "tags", catalogDraft.tags, (v) => setCatalogDraft({ ...catalogDraft, tags: v }))}
+              {renderMultiSelectField("Etiquetas", "tags", catalogDraft.tags, (v) => setCatalogDraft({ ...catalogDraft, tags: v }))}
 
-              {renderDynamicSelectField("Specs", "specs", catalogDraft.specs, (v) => setCatalogDraft({ ...catalogDraft, specs: v }))}
+              {renderMultiSelectField("Specs", "specs", catalogDraft.specs, (v) => setCatalogDraft({ ...catalogDraft, specs: v }))}
 
               <label>Imagen URL
                 <input onChange={(event) => setCatalogDraft({ ...catalogDraft, imageUrl: event.target.value })} placeholder="https://..." value={catalogDraft.imageUrl} />
@@ -4121,6 +5805,45 @@ export default function App() {
                       ))}
                     </div>
                   )}
+
+                  {catalogDraft.existingImages && catalogDraft.existingImages.length > 0 && (
+                    <div style={{ marginTop: "0.6rem" }}>
+                      <span style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--muted)", display: "block", marginBottom: "0.3rem" }}>
+                        Imágenes registradas en Google Drive:
+                      </span>
+                      <div className="live-preview-grid">
+                        {catalogDraft.existingImages.map((imgUrl, idx) => {
+                          const fileIdMatch = imgUrl.match(/\/(?:d|drive-file)\/([a-zA-Z0-9_-]+)/);
+                          const fileId = fileIdMatch ? fileIdMatch[1] : "";
+                          return (
+                            <div className="preview-thumb-card" key={idx} style={{ position: "relative" }}>
+                              <img alt={`Portada ${idx + 1}`} src={imgUrl} />
+                              <div style={{ position: "absolute", bottom: 4, right: 4, display: "flex", gap: 3 }}>
+                                {fileId && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRenameExistingDriveFile(fileId, `Portada_${idx + 1}`, "image")}
+                                    style={{ background: "rgba(0,0,0,0.8)", color: "#fff", border: "none", borderRadius: 4, padding: "3px 5px", cursor: "pointer" }}
+                                    title="Renombrar en Google Drive"
+                                  >
+                                    <Edit3 size={11} />
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteExistingDriveFile(fileId || imgUrl, "image", imgUrl)}
+                                  style={{ background: "rgba(220,38,38,0.85)", color: "#fff", border: "none", borderRadius: 4, padding: "3px 5px", cursor: "pointer" }}
+                                  title="Eliminar de Google Drive"
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* 2. Modelo 3D GLB / GLTF (Opcional - 3D & Realidad Aumentada) */}
@@ -4128,12 +5851,12 @@ export default function App() {
                   <label>
                     <Sparkles size={16} /> Modelo 3D (.glb / .gltf) - Habilita Visor 3D y Realidad Aumentada (Opcional)
                   </label>
-                  {!catalogDraft.glbFile ? (
+                  {!catalogDraft.glbFile && !catalogDraft.existingGlbUrl ? (
                     <label className="upload-input-btn">
                       <Plus size={16} /> Seleccionar archivo .glb o .gltf
                       <input accept=".glb,.gltf" onChange={handleSelectGlbFile} type="file" />
                     </label>
-                  ) : (
+                  ) : catalogDraft.glbFile ? (
                     <div className="glb-file-badge">
                       <span>
                         <Sparkles size={15} style={{ marginRight: 6 }} />
@@ -4142,6 +5865,41 @@ export default function App() {
                       <button className="remove-btn" onClick={handleRemoveGlbFile} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer" }} type="button">
                         <X size={16} />
                       </button>
+                    </div>
+                  ) : (
+                    <div className="glb-file-badge" style={{ background: "rgba(15, 104, 114, 0.12)", border: "1px solid var(--accent)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700 }}>
+                        <Sparkles size={15} style={{ color: "var(--accent)" }} />
+                        Modelo 3D vinculado en Google Drive
+                      </span>
+                      <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+                        {(() => {
+                          const fileIdMatch = (catalogDraft.existingGlbUrl || "").match(/\/(?:d|drive-file)\/([a-zA-Z0-9_-]+)/);
+                          const fileId = fileIdMatch ? fileIdMatch[1] : "";
+                          return (
+                            <>
+                              {fileId && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRenameExistingDriveFile(fileId, `${catalogDraft.name}.glb`, "glb")}
+                                  style={{ background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--ink)", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: 3 }}
+                                  title="Renombrar en Google Drive"
+                                >
+                                  <Edit3 size={12} /> Renombrar
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteExistingDriveFile(fileId || catalogDraft.existingGlbUrl || "", "glb")}
+                                style={{ background: "rgba(220,38,38,0.15)", border: "1px solid rgba(220,38,38,0.4)", color: "#ef4444", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: 3 }}
+                                title="Eliminar de Google Drive"
+                              >
+                                <Trash2 size={12} /> Eliminar
+                              </button>
+                            </>
+                          );
+                        })()}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -4169,6 +5927,62 @@ export default function App() {
                             <X size={12} />
                           </button>
                         </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {catalogDraft.existingAttachedFiles && catalogDraft.existingAttachedFiles.length > 0 && (
+                    <div style={{ marginTop: "0.6rem", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                      <span style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--muted)" }}>
+                        Archivos registrados en Google Drive:
+                      </span>
+                      {catalogDraft.existingAttachedFiles.map((f) => (
+                        <div
+                          key={f.id || f.name}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "0.45rem 0.8rem",
+                            background: "var(--surface-2)",
+                            border: "1px solid var(--line)",
+                            borderRadius: "8px",
+                            fontSize: "0.85rem"
+                          }}
+                        >
+                          <span style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontWeight: 600, minWidth: 0, flex: 1 }}>
+                            <FileText size={15} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                            <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.name}</span>
+                          </span>
+                          <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                            {f.webViewLink && (
+                              <a
+                                href={f.webViewLink}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ fontSize: "0.78rem", color: "var(--accent)", textDecoration: "none", fontWeight: 600, padding: "2px 6px" }}
+                              >
+                                Ver en Drive ↗
+                              </a>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleRenameExistingDriveFile(f.id || "", f.name, "attached")}
+                              style={{ background: "none", border: "none", color: "var(--ink)", cursor: "pointer", padding: "2px 5px" }}
+                              title="Renombrar archivo en Google Drive"
+                            >
+                              <Edit3 size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteExistingDriveFile(f.id || "", "attached", f)}
+                              style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", padding: "2px 5px" }}
+                              title="Eliminar archivo de Google Drive"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   )}
@@ -4640,31 +6454,84 @@ export default function App() {
           </div>
         </div>
 
-        {/* Contenedor de Tarjetas con Modo Dinámico */}
-        <div className={`plugin-cards-container mode-${pluginViewMode}`}>
-          {filteredProducts.map((product) => {
-            const isFav = favorites.includes(product.id);
+        {/* Contenedor de Tarjetas con Modo Dinámico (con Skeleton animado durante carga) */}
+        {dbLoading.catalog ? (
+          <div className={`plugin-cards-container mode-${pluginViewMode}`}>
+            {Array.from({ length: pluginViewMode === "list" ? 6 : pluginViewMode === "compact" ? 9 : 6 }, (_, idx) => (
+              <div className={`plugin-skeleton-card mode-${pluginViewMode}`} key={`plugin-skel-${idx}`}>
+                <div className="plugin-skeleton-thumb-box" />
+                <div className="plugin-skeleton-info-box">
+                  <div className="plugin-skeleton-line title" />
+                  <div className="plugin-skeleton-line sub" />
+                  <div className="plugin-skeleton-line button" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : filteredProducts.length === 0 ? (
+          <div style={{ padding: "3rem 1.5rem", textAlign: "center", color: "var(--muted)", fontSize: "0.88rem" }}>
+            No se encontraron familias BIM para esta búsqueda en el plugin.
+          </div>
+        ) : (
+          <div className={`plugin-cards-container mode-${pluginViewMode}`}>
+            {filteredProducts.map((product) => {
+              const isFav = favorites.includes(product.id);
 
-            if (pluginViewMode === "list") {
-              return (
-                <div
-                  key={product.id}
-                  className="plugin-card-list-row"
-                  onClick={() => setSelectedPluginProduct(product)}
-                >
-                  <div className="plugin-list-thumb">
-                    {renderCatalogVisual(product, "plugin-visual-list")}
-                  </div>
-                  <div className="plugin-list-info">
-                    <h4 title={product.name}>{product.name}</h4>
-                    <div className="plugin-list-meta">
-                      <span className="plugin-maker-tag">{product.maker || "InfraBIM"}</span>
-                      <span className="plugin-fmt-chip">{product.formats[0] || "RFA"}</span>
+              if (pluginViewMode === "list") {
+                return (
+                  <div
+                    key={product.id}
+                    className="plugin-card-list-row"
+                    onClick={() => setSelectedPluginProduct(product)}
+                  >
+                    <div className="plugin-list-thumb">
+                      {renderCatalogVisual(product, "plugin-visual-list")}
+                    </div>
+                    <div className="plugin-list-info">
+                      <h4 title={product.name}>{product.name}</h4>
+                      <div className="plugin-list-meta">
+                        <span className="plugin-maker-tag">{product.maker || "InfraBIM"}</span>
+                        <span className="plugin-fmt-chip">{product.formats[0] || "RFA"}</span>
+                      </div>
+                    </div>
+                    <div className="plugin-list-actions">
+                      <button
+                        className={`plugin-card-fav-inline ${isFav ? "active" : ""}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFavoriteItem(product.id);
+                        }}
+                        type="button"
+                        aria-label="Favorito"
+                      >
+                        <Heart size={13} fill={isFav ? "currentColor" : "none"} />
+                      </button>
+                      <button
+                        className="plugin-insert-btn-compact"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDownloadOrInsert(product);
+                        }}
+                        type="button"
+                        title="Cargar en Revit"
+                      >
+                        <Download size={12} />
+                        <span>Cargar</span>
+                      </button>
                     </div>
                   </div>
-                  <div className="plugin-list-actions">
+                );
+              }
+
+              if (pluginViewMode === "compact") {
+                return (
+                  <div
+                    key={product.id}
+                    className="plugin-card-compact"
+                    onClick={() => setSelectedPluginProduct(product)}
+                  >
                     <button
-                      className={`plugin-card-fav-inline ${isFav ? "active" : ""}`}
+                      className="plugin-card-fav"
                       onClick={(e) => {
                         e.stopPropagation();
                         toggleFavoriteItem(product.id);
@@ -4674,28 +6541,31 @@ export default function App() {
                     >
                       <Heart size={13} fill={isFav ? "currentColor" : "none"} />
                     </button>
-                    <button
-                      className="plugin-insert-btn-compact"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDownloadOrInsert(product);
-                      }}
-                      type="button"
-                      title="Cargar en Revit"
-                    >
-                      <Download size={12} />
-                      <span>Cargar</span>
-                    </button>
+                    <div className="plugin-compact-thumb">
+                      {renderCatalogVisual(product, "plugin-visual-compact")}
+                    </div>
+                    <div className="plugin-compact-details">
+                      <h4 title={product.name}>{product.name}</h4>
+                      <button
+                        className="plugin-insert-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDownloadOrInsert(product);
+                        }}
+                        type="button"
+                      >
+                        <Download size={13} /> Cargar
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
-            }
+                );
+              }
 
-            if (pluginViewMode === "compact") {
+              // Default mode "grid"
               return (
                 <div
                   key={product.id}
-                  className="plugin-card-compact"
+                  className="plugin-card-grid-item"
                   onClick={() => setSelectedPluginProduct(product)}
                 >
                   <button
@@ -4707,13 +6577,19 @@ export default function App() {
                     type="button"
                     aria-label="Favorito"
                   >
-                    <Heart size={13} fill={isFav ? "currentColor" : "none"} />
+                    <Heart size={14} fill={isFav ? "currentColor" : "none"} />
                   </button>
-                  <div className="plugin-compact-thumb">
-                    {renderCatalogVisual(product, "plugin-visual-compact")}
+                  <div className="plugin-card-thumb">
+                    {renderCatalogVisual(product, "plugin-visual")}
                   </div>
-                  <div className="plugin-compact-details">
+                  <div className="plugin-card-details">
                     <h4 title={product.name}>{product.name}</h4>
+                    <div className="plugin-card-tags">
+                      <span className="plugin-maker-tag">{product.maker || "InfraBIM"}</span>
+                      {product.formats.slice(0, 3).map((fmt) => (
+                        <span key={fmt} className="plugin-fmt-badge">{fmt}</span>
+                      ))}
+                    </div>
                     <button
                       className="plugin-insert-btn"
                       onClick={(e) => {
@@ -4722,57 +6598,14 @@ export default function App() {
                       }}
                       type="button"
                     >
-                      <Download size={13} /> Cargar
+                      <Download size={14} /> Cargar en Revit
                     </button>
                   </div>
                 </div>
               );
-            }
-
-            // Default mode "grid"
-            return (
-              <div
-                key={product.id}
-                className="plugin-card-grid-item"
-                onClick={() => setSelectedPluginProduct(product)}
-              >
-                <button
-                  className="plugin-card-fav"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleFavoriteItem(product.id);
-                  }}
-                  type="button"
-                  aria-label="Favorito"
-                >
-                  <Heart size={14} fill={isFav ? "currentColor" : "none"} />
-                </button>
-                <div className="plugin-card-thumb">
-                  {renderCatalogVisual(product, "plugin-visual")}
-                </div>
-                <div className="plugin-card-details">
-                  <h4 title={product.name}>{product.name}</h4>
-                  <div className="plugin-card-tags">
-                    <span className="plugin-maker-tag">{product.maker || "InfraBIM"}</span>
-                    {product.formats.slice(0, 3).map((fmt) => (
-                      <span key={fmt} className="plugin-fmt-badge">{fmt}</span>
-                    ))}
-                  </div>
-                  <button
-                    className="plugin-insert-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDownloadOrInsert(product);
-                    }}
-                    type="button"
-                  >
-                    <Download size={14} /> Cargar en Revit
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+            })}
+          </div>
+        )}
 
         {/* Modal Emergente con Fondo Desenfocado y Visor 3D */}
         {selectedPluginProduct && (
@@ -5521,6 +7354,11 @@ export default function App() {
       <button className="chat-button" onClick={openSupport} type="button" aria-label="Abrir soporte">
         ?
       </button>
+
+      {renderMasterOptionsModal()}
+      {renderBulkSelectionModal()}
+      {renderBulkProgressModal()}
+      {renderBulkPreparingModal()}
 
       {toasts.length > 0 && (
         <div className="toast-container" aria-live="polite">
