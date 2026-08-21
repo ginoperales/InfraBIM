@@ -22,38 +22,74 @@ let cachedJwks = null;
 
 export default {
   async fetch(request, env) {
+    // Always compute CORS headers first so they are included in every response,
+    // including preflight, error 4xx/5xx and unexpected throws.
     const headers = corsHeaders(request, env);
 
     if (request.method === "OPTIONS") {
       return new Response(null, { headers, status: 204 });
     }
 
+    const url = new URL(request.url);
+
+    // Webhook IPN route — process any method/ping immediately and respond 200 OK
+    if (url.pathname === "/mercado-pago-webhook") {
+      return await mercadoPagoWebhook(request, env, headers);
+    }
+
+    // Health check — useful to diagnose connectivity from localhost
+    if (request.method === "GET" && url.pathname === "/") {
+      return json(
+        {
+          ok: true,
+          service: "InfraBIM payments worker",
+          configOk: Boolean(env.MERCADO_PAGO_ACCESS_TOKEN && env.FIREBASE_SERVICE_ACCOUNT),
+        },
+        headers,
+      );
+    }
+
+    // Guard: if secrets are missing return 503 (not 500) so the frontend
+    // can show a clearer message instead of a generic CORS/network error.
+    if (!env.MERCADO_PAGO_ACCESS_TOKEN || !env.FIREBASE_SERVICE_ACCOUNT) {
+      return json(
+        {
+          message:
+            "El Worker de pagos no está configurado. Agrega MERCADO_PAGO_ACCESS_TOKEN y FIREBASE_SERVICE_ACCOUNT en Cloudflare.",
+          code: "WORKER_NOT_CONFIGURED",
+        },
+        headers,
+        503,
+      );
+    }
+
     try {
-      const url = new URL(request.url);
-
-      if (request.method === "GET" && url.pathname === "/") {
-        return json({ ok: true, service: "InfraBIM payments worker" }, headers);
-      }
-
       if (request.method === "POST" && url.pathname === "/create-card-subscription") {
-        return createCardSubscription(request, env, headers);
+        return await createCardSubscription(request, env, headers);
       }
 
       if (request.method === "POST" && url.pathname === "/create-yape-payment") {
-        return createYapePayment(request, env, headers);
+        return await createYapePayment(request, env, headers);
       }
 
-      if (request.method === "POST" && url.pathname === "/mercado-pago-webhook") {
-        return mercadoPagoWebhook(request, env, headers);
+      if (request.method === "POST" && url.pathname === "/upload-resource-drive-files") {
+        return await uploadResourceDriveFiles(request, env, headers);
+      }
+
+      if (request.method === "GET" && (url.pathname.startsWith("/drive-file/") || url.pathname === "/drive-file")) {
+        return await serveDriveFile(request, env, headers);
       }
 
       return json({ message: "Ruta no encontrada." }, headers, 404);
     } catch (error) {
-      return json(
-        { message: error instanceof Error ? error.message : "No se pudo procesar la solicitud." },
-        headers,
-        500,
-      );
+      // IMPORTANT: the catch block MUST use the pre-computed `headers` so that
+      // even error responses carry the Access-Control-Allow-Origin header.
+      const message = error instanceof Error ? error.message : "No se pudo procesar la solicitud.";
+      const status =
+        error instanceof Error && typeof error.status === "number" && error.status >= 400 && error.status < 600
+          ? error.status
+          : 400;
+      return json({ message }, headers, status);
     }
   },
 };
@@ -186,26 +222,49 @@ async function createYapePayment(request, env, headers) {
 }
 
 async function mercadoPagoWebhook(request, env, headers) {
-  assertEnv(env);
   const url = new URL(request.url);
-  const body = await request.json().catch(() => ({}));
-  const eventId = crypto.randomUUID();
+  let body = {};
 
-  await savePaymentRecord(env, "paymentWebhookEvents", eventId, {
-    body,
-    createdAt: new Date(),
-    query: Object.fromEntries(url.searchParams.entries()),
-    source: "mercado_pago",
-  });
-
-  const resourceId = body?.data?.id || url.searchParams.get("id");
-  const type = body?.type || url.searchParams.get("topic") || url.searchParams.get("type");
-
-  if (resourceId && type) {
-    await refreshMercadoPagoResource(env, String(type), String(resourceId));
+  try {
+    const contentType = request.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      body = await request.json().catch(() => ({}));
+    } else if (contentType.includes("form")) {
+      const text = await request.text().catch(() => "");
+      body = Object.fromEntries(new URLSearchParams(text));
+    }
+  } catch (err) {
+    body = {};
   }
 
-  return json({ ok: true }, headers);
+  const eventId = crypto.randomUUID();
+  const queryParams = Object.fromEntries(url.searchParams.entries());
+
+  if (env.MERCADO_PAGO_ACCESS_TOKEN && env.FIREBASE_SERVICE_ACCOUNT) {
+    try {
+      await savePaymentRecord(env, "paymentWebhookEvents", eventId, {
+        body,
+        createdAt: new Date(),
+        query: queryParams,
+        source: "mercado_pago",
+      });
+    } catch (err) {
+      console.warn("Could not save webhook log event:", err);
+    }
+  }
+
+  const resourceId = body?.data?.id || url.searchParams.get("id") || body?.id;
+  const type = body?.type || url.searchParams.get("topic") || url.searchParams.get("type") || body?.topic;
+
+  if (resourceId && type && env.MERCADO_PAGO_ACCESS_TOKEN && env.FIREBASE_SERVICE_ACCOUNT) {
+    try {
+      await refreshMercadoPagoResource(env, String(type), String(resourceId));
+    } catch (err) {
+      console.warn(`Resource lookup skipped/failed for ${type} ${resourceId}:`, err);
+    }
+  }
+
+  return json({ ok: true, received: true }, headers, 200);
 }
 
 async function refreshMercadoPagoResource(env, type, resourceId) {
@@ -392,7 +451,14 @@ async function mercadoPagoRequest(path, body, env) {
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(payload.message || payload.error || "Mercado Pago rechazo la operacion.");
+    const detail =
+      payload.cause?.[0]?.description ||
+      payload.message ||
+      payload.error ||
+      "Mercado Pago rechazo la operacion.";
+    const err = new Error(`Mercado Pago: ${detail}`);
+    err.status = response.status >= 400 && response.status < 600 ? response.status : 400;
+    throw err;
   }
 
   return payload;
@@ -474,6 +540,196 @@ async function getFirestoreDocument(env, documentPath) {
   return response.json();
 }
 
+const ROOT_DRIVE_FOLDER_ID = "1rgmaezSy8mEwkYi0RTqHSne1fLue1p6U";
+
+async function uploadResourceDriveFiles(request, env, headers) {
+  assertEnv(env);
+  const user = await getFirebaseUser(request, env);
+  const { resourceName, resourceId, images = [], glbFile = null, attachedFiles = [] } = await request.json();
+
+  if (!resourceName) {
+    return json({ message: "Nombre del recurso es requerido." }, headers, 400);
+  }
+
+  const accessToken = await getGoogleAccessToken(env);
+  const cleanName = String(resourceName).trim().replace(/[\\/:*?"<>|]/g, "_");
+  const folderSlug = resourceId || crypto.randomUUID().slice(0, 8);
+  const folderName = `${cleanName} - ${folderSlug}`;
+
+  // 1. Create dedicated subfolder in Google Drive under root folder (1rgmaezSy8mEwkYi0RTqHSne1fLue1p6U)
+  const folder = await createDriveFolder(accessToken, folderName, ROOT_DRIVE_FOLDER_ID);
+
+  const uploadedImages = [];
+  let uploadedGlbUrl = "";
+  const uploadedFiles = [];
+
+  // 2. Upload cover images to Drive
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i];
+    if (img?.base64) {
+      const file = await uploadFileToDrive(
+        accessToken,
+        img.name || `portada_${i + 1}.png`,
+        img.mimeType || "image/png",
+        img.base64,
+        folder.id
+      );
+      uploadedImages.push(file.directUrl);
+    }
+  }
+
+  // 3. Upload 3D GLB model to Drive
+  if (glbFile && glbFile.base64) {
+    const glbResult = await uploadFileToDrive(
+      accessToken,
+      glbFile.name || "modelo_3d.glb",
+      glbFile.mimeType || "model/gltf-binary",
+      glbFile.base64,
+      folder.id
+    );
+    uploadedGlbUrl = glbResult.directUrl;
+  }
+
+  // 4. Upload attached BIM files to Drive
+  for (const file of attachedFiles) {
+    if (file?.base64) {
+      const result = await uploadFileToDrive(
+        accessToken,
+        file.name || "archivo_recurso",
+        file.mimeType || "application/octet-stream",
+        file.base64,
+        folder.id
+      );
+      uploadedFiles.push({
+        id: result.id,
+        name: result.name,
+        mimeType: result.mimeType,
+        size: result.size,
+        webViewLink: result.webViewLink,
+        webContentLink: result.webContentLink,
+        directUrl: result.directUrl,
+      });
+    }
+  }
+
+  return json(
+    {
+      ok: true,
+      driveFolderId: folder.id,
+      driveFolderLink: folder.webViewLink || `https://drive.google.com/drive/folders/${folder.id}`,
+      images: uploadedImages,
+      glbUrl: uploadedGlbUrl,
+      attachedFiles: uploadedFiles,
+      storageProvider: "google_drive",
+    },
+    headers
+  );
+}
+
+async function createDriveFolder(accessToken, name, parentFolderId = ROOT_DRIVE_FOLDER_ID) {
+  const body = {
+    name,
+    mimeType: "application/vnd.google-apps.folder",
+    parents: [parentFolderId],
+  };
+
+  const response = await fetch("https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id,name,webViewLink", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    if (data.error?.message?.includes("File not found") || data.error?.code === 404) {
+      throw new Error(
+        `La carpeta raíz de Drive (${parentFolderId}) aún no ha sido compartida. Abre la carpeta en Google Drive y compártela con firebase-adminsdk-fbsvc@infrabimss.iam.gserviceaccount.com como Editor.`
+      );
+    }
+    if (data.error?.message?.includes("storage quota")) {
+      throw new Error(
+        `Debes compartir la carpeta de Drive (${parentFolderId}) con firebase-adminsdk-fbsvc@infrabimss.iam.gserviceaccount.com como Editor para consumir la cuota de tu cuenta.`
+      );
+    }
+    throw new Error(data.error?.message || "No se pudo crear la subcarpeta en Google Drive.");
+  }
+
+  await setDrivePublicPermission(accessToken, data.id);
+  return data;
+}
+
+async function setDrivePublicPermission(accessToken, fileId) {
+  await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions?supportsAllDrives=true`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      role: "reader",
+      type: "anyone",
+    }),
+  }).catch(() => null);
+}
+
+async function uploadFileToDrive(accessToken, fileName, mimeType, base64Content, parentFolderId) {
+  const boundary = `infrabim_upload_${crypto.randomUUID().slice(0, 8)}`;
+  const metadata = {
+    name: fileName,
+    mimeType: mimeType || "application/octet-stream",
+    parents: [parentFolderId],
+  };
+
+  const cleanBase64 = String(base64Content).replace(/^data:[^;]+;base64,/, "");
+  const binaryString = atob(cleanBase64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+
+  const encoder = new TextEncoder();
+  const part1 = encoder.encode(
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${mimeType || "application/octet-stream"}\r\nContent-Transfer-Encoding: binary\r\n\r\n`
+  );
+  const part2 = encoder.encode(`\r\n--${boundary}--`);
+
+  const fullBody = new Uint8Array(part1.length + bytes.length + part2.length);
+  fullBody.set(part1, 0);
+  fullBody.set(bytes, part1.length);
+  fullBody.set(part2, part1.length + bytes.length);
+
+  const response = await fetch(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,mimeType,size,webViewLink,webContentLink",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": `multipart/related; boundary=${boundary}`,
+      },
+      body: fullBody,
+    }
+  );
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error?.message || `Error al subir ${fileName} a Google Drive.`);
+  }
+
+  await setDrivePublicPermission(accessToken, data.id);
+  return {
+    id: data.id,
+    name: data.name,
+    mimeType: data.mimeType,
+    size: data.size,
+    webViewLink: data.webViewLink,
+    webContentLink: data.webContentLink || `https://drive.google.com/uc?export=download&id=${data.id}`,
+    directUrl: `https://lh3.googleusercontent.com/d/${data.id}`,
+  };
+}
+
 async function getGoogleAccessToken(env) {
   if (cachedGoogleToken?.expiresAt > Date.now() + 60_000) {
     return cachedGoogleToken.value;
@@ -486,7 +742,7 @@ async function getGoogleAccessToken(env) {
     exp: now + 3600,
     iat: now,
     iss: serviceAccount.client_email,
-    scope: "https://www.googleapis.com/auth/datastore",
+    scope: "https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/devstorage.full_control",
   });
   const response = await fetch("https://oauth2.googleapis.com/token", {
     body: new URLSearchParams({
@@ -501,7 +757,7 @@ async function getGoogleAccessToken(env) {
   const payload = await response.json();
 
   if (!response.ok) {
-    throw new Error(payload.error_description || "No se pudo autenticar Firestore.");
+    throw new Error(payload.error_description || "No se pudo autenticar Google Services.");
   }
 
   cachedGoogleToken = {
@@ -620,7 +876,13 @@ function corsHeaders(request, env) {
     .map((origin) => origin.trim())
     .filter(Boolean);
   const requestOrigin = request.headers.get("Origin") || "";
-  const origin = allowedOrigins.includes(requestOrigin) ? requestOrigin : allowedOrigins[0] || "*";
+  const isLocalhost =
+    requestOrigin.startsWith("http://localhost:") ||
+    requestOrigin.startsWith("http://127.0.0.1:");
+  const origin =
+    allowedOrigins.includes(requestOrigin) || isLocalhost
+      ? requestOrigin
+      : allowedOrigins[0] || "*";
 
   return {
     "Access-Control-Allow-Headers": "Authorization, Content-Type",
@@ -676,3 +938,54 @@ function pemToArrayBuffer(pem) {
 
   return base64UrlToBytes(base64.replace(/\+/g, "-").replace(/\//g, "_")).buffer;
 }
+
+async function serveDriveFile(request, env, headers) {
+  const url = new URL(request.url);
+  const fileId =
+    url.pathname.replace("/drive-file/", "").replace("/drive-file", "").trim() ||
+    url.searchParams.get("id");
+
+  if (!fileId) {
+    return json({ message: "ID de archivo de Drive no proporcionado." }, headers, 400);
+  }
+
+  try {
+    const accessToken = await getGoogleAccessToken(env);
+    const driveRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    if (!driveRes.ok) {
+      const errorText = await driveRes.text();
+      return json(
+        { message: "No se pudo obtener el archivo de Google Drive.", details: errorText },
+        headers,
+        driveRes.status
+      );
+    }
+
+    const contentType = driveRes.headers.get("content-type") || "application/octet-stream";
+    const fileBuffer = await driveRes.arrayBuffer();
+
+    return new Response(fileBuffer, {
+      status: 200,
+      headers: {
+        ...headers,
+        "Content-Type":
+          contentType.includes("json") || contentType.includes("html") || contentType === "application/octet-stream"
+            ? "model/gltf-binary"
+            : contentType,
+        "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Error al descargar recurso de Drive.";
+    return json({ message }, headers, 500);
+  }
+}
+

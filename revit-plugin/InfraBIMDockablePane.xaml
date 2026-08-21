@@ -1,0 +1,26 @@
+<UserControl x:Class="InfraBIMPlugin.InfraBIMDockablePane"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+             mc:Ignorable="d" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             d:DesignHeight="800" d:DesignWidth="400">
+    <Grid Background="#121619">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Barra Superior del Panel -->
+        <Border Grid.Row="0" Background="#1a2024" Padding="12,8" BorderBrush="#2e383e" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <Button Content="🔄 Recargar" Click="OnReloadClick" DockPanel.Dock="Right" Padding="8,4" Background="#242c31" Foreground="#f0f4f6" BorderBrush="#2e383e" Cursor="Hand"/>
+                <TextBlock Text="InfraBIM Hub para Revit" Foreground="#1bb0c0" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
+            </DockPanel>
+        </Border>
+
+        <!-- Navegador Web Embebido (WebView2) -->
+        <wv2:WebView2 x:Name="webView" Grid.Row="1" />
+    </Grid>
+</UserControl>

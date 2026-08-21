@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>InfraBIM Revit Plugin</Name>
+    <Assembly>InfraBIMPlugin.dll</Assembly>
+    <FullClassName>InfraBIMPlugin.AppMain</FullClassName>
+    <AddInId>1A2B3C4D-5E6F-7890-ABCD-EF1234567890</AddInId>
+    <VendorId>INFRA_BIM</VendorId>
+    <VendorDescription>InfraBIM Hub — Biblioteca, inteligencia artificial y herramientas BIM para Revit</VendorDescription>
+  </AddIn>
+</RevitAddIns>

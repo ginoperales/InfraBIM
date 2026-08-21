@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "dgSpecHash": "JrTBLlnFaO0=",
+  "success": true,
+  "projectFilePath": "D:\\Project\\InfraBIM\\revit-plugin\\InfraBIMPlugin.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\gin_0\\.nuget\\packages\\microsoft.web.webview2\\1.0.2903.40\\microsoft.web.webview2.1.0.2903.40.nupkg.sha512",
+    "C:\\Users\\gin_0\\.nuget\\packages\\nice3point.revit.api.revitapi\\2025.0.2\\nice3point.revit.api.revitapi.2025.0.2.nupkg.sha512",
+    "C:\\Users\\gin_0\\.nuget\\packages\\nice3point.revit.api.revitapiui\\2025.0.2\\nice3point.revit.api.revitapiui.2025.0.2.nupkg.sha512",
+    "C:\\Users\\gin_0\\.nuget\\packages\\system.text.json\\8.0.5\\system.text.json.8.0.5.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1603",
+      "level": "Warning",
+      "message": "InfraBIMPlugin depends on Nice3point.Revit.Api.RevitAPI (>= 2025.0.0) but Nice3point.Revit.Api.RevitAPI 2025.0.0 was not found. Nice3point.Revit.Api.RevitAPI 2025.0.2 was resolved instead.",
+      "projectPath": "D:\\Project\\InfraBIM\\revit-plugin\\InfraBIMPlugin.csproj",
+      "warningLevel": 1,
+      "filePath": "D:\\Project\\InfraBIM\\revit-plugin\\InfraBIMPlugin.csproj",
+      "libraryId": "Nice3point.Revit.Api.RevitAPI",
+      "targetGraphs": [
+        "net8.0-windows7.0"
+      ]
+    },
+    {
+      "code": "NU1603",
+      "level": "Warning",
+      "message": "InfraBIMPlugin depends on Nice3point.Revit.Api.RevitAPIUI (>= 2025.0.0) but Nice3point.Revit.Api.RevitAPIUI 2025.0.0 was not found. Nice3point.Revit.Api.RevitAPIUI 2025.0.2 was resolved instead.",
+      "projectPath": "D:\\Project\\InfraBIM\\revit-plugin\\InfraBIMPlugin.csproj",
+      "warningLevel": 1,
+      "filePath": "D:\\Project\\InfraBIM\\revit-plugin\\InfraBIMPlugin.csproj",
+      "libraryId": "Nice3point.Revit.Api.RevitAPIUI",
+      "targetGraphs": [
+        "net8.0-windows7.0"
+      ]
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -49,7 +50,15 @@ export type CatalogItemPayload = BimObjectPayload & {
   feature: string;
   isPremium: boolean;
   imageUrl?: string;
+  images?: string[];
+  glbUrl?: string;
+  has3D?: boolean;
+  hasAR?: boolean;
+  driveFolderId?: string;
+  driveFolderLink?: string;
+  attachedFiles?: DriveFilePayload[];
   ownerUid?: string;
+  isArchived?: boolean;
 };
 
 export type ModuleKey =
@@ -264,8 +273,8 @@ function normalizePaymentPlans(data: Partial<PaymentPlansConfig>): PaymentPlansC
     return {
       ...plans,
       [planId]: {
-        description: source?.description || fallback.description,
-        label: source?.label || fallback.label,
+        description: source?.description?.trim() || fallback.description,
+        label: source?.label?.trim() || fallback.label,
         prices: {
           mensual: Number(source?.prices?.mensual) > 0 ? Number(source?.prices?.mensual) : fallback.prices.mensual,
           anual: Number(source?.prices?.anual) > 0 ? Number(source?.prices?.anual) : fallback.prices.anual,
@@ -406,6 +415,23 @@ export async function fetchCatalogItems(maxResults = 80): Promise<CatalogItemPay
   );
 
   return snapshot.docs.map((item) => item.data() as CatalogItemPayload);
+}
+
+export async function deleteCatalogItem(kind: CatalogKind, slug: string) {
+  const firestore = requireDb();
+  await deleteDoc(doc(firestore, "catalogItems", `${kind}_${slug}`));
+}
+
+export async function toggleArchiveCatalogItem(kind: CatalogKind, slug: string, isArchived: boolean) {
+  const firestore = requireDb();
+  await setDoc(
+    doc(firestore, "catalogItems", `${kind}_${slug}`),
+    {
+      isArchived,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
 }
 
 export async function saveFavorite(uid: string, product: BimObjectPayload) {
