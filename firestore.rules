@@ -14,10 +14,43 @@ service cloud.firestore {
       return signedIn() && request.auth.token.email_verified == true;
     }
 
-    function isAdmin() {
+    function isAccessOwner() {
       return signedIn()
         && exists(/databases/$(database)/documents/system/accessControl)
         && get(/databases/$(database)/documents/system/accessControl).data.ownerUid == request.auth.uid;
+    }
+
+    function hasAdminRole() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "Administrador";
+    }
+
+    function isAdmin() {
+      return isAccessOwner() || hasAdminRole();
+    }
+
+    function canCreateOwnUserProfile(uid) {
+      return isOwner(uid)
+        && (
+          !request.resource.data.keys().hasAny(["role"])
+          || request.resource.data.role == "Usuario"
+          || (
+            request.resource.data.role == "Administrador"
+            && !exists(/databases/$(database)/documents/system/accessControl)
+          )
+        );
+    }
+
+    function canUpdateOwnUserProfile(uid) {
+      return isOwner(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "uid",
+          "displayName",
+          "email",
+          "photoURL",
+          "updatedAt"
+        ]);
     }
 
     match /system/accessControl {
@@ -36,9 +69,9 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read: if isOwner(uid) || isAdmin();
-      allow create: if isOwner(uid);
-      allow update: if isOwner(uid) || isAdmin();
-      allow delete: if false;
+      allow create: if canCreateOwnUserProfile(uid);
+      allow update: if isAdmin() || canUpdateOwnUserProfile(uid);
+      allow delete: if isAdmin() && request.auth.uid != uid;
 
       match /favorites/{favoriteId} {
         allow read, write: if isOwner(uid);

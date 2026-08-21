@@ -9,7 +9,7 @@ test("builds a Firebase Hosting compatible SPA", async () => {
     readdir(new URL("../dist/assets/", import.meta.url)),
   ]);
 
-  assert.match(html, /<title>InfraBIM Hub<\/title>/);
+  assert.match(html, /<title>InfraBIM<\/title>/);
   assert.match(html, /type="module"/);
   assert.match(firebaseConfig, /"public": "dist"/);
   assert.match(firebaseConfig, /"destination": "\/index.html"/);

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://infrabimss.web.app/sitemap.xml

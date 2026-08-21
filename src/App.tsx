@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   browserLocalPersistence,
+  getAdditionalUserInfo,
   GoogleAuthProvider,
   onAuthStateChanged,
   setPersistence,
@@ -14,6 +15,7 @@ import {
   Archive,
   ArchiveRestore,
   Armchair,
+  ArrowRight,
   Bath,
   Bell,
   BookOpen,
@@ -86,7 +88,10 @@ import {
 } from "./lib/mercadoPago";
 import {
   deleteCatalogItem,
+  deleteUserProfile,
+  fetchUsers,
   initializeUserAccess,
+  incrementCatalogDownload,
   saveAccessControl,
   fetchCatalogItems,
   fetchPaymentPlans,
@@ -96,6 +101,7 @@ import {
   saveCatalogItem,
   savePaymentPlans,
   saveFavorite,
+  saveUserProfile,
   toggleArchiveCatalogItem,
   type AccessControl,
   type BimObjectPayload,
@@ -105,19 +111,26 @@ import {
   type ModuleKey,
   type PaymentPlansConfig,
   type RoleKey,
+  type UserProfile,
+  type UserSubscription,
   defaultPaymentPlansConfig,
 } from "./lib/firestore";
 import {
-  createDriveFolderClient,
   deleteDriveFileClient,
+  downloadDriveFileBlobClient,
+  getOrCreateDriveFolderClient,
   listDriveFiles,
+  listDriveFolderFilesRecursiveClient,
   renameDriveFileClient,
   uploadFileToDriveClient,
   uploadJsonToDrive,
   type DriveFile,
 } from "./lib/googleDrive";
 import { matchesBilingualSearch } from "./lib/bilingualSearch";
+import { createStoredZip, sanitizeZipPath, type ZipSourceFile } from "./lib/zip";
 import "./styles.css";
+
+const MIN_YAPE_PAYMENT_AMOUNT_PEN = 5;
 
 type UploadFileItem = {
   id: string;
@@ -228,7 +241,32 @@ type CheckoutState = {
   planId: PaidPlanId;
 };
 
-type DbLoadKey = "access" | "catalog" | "objects" | "plans";
+type AdminUserDraft = {
+  uid: string;
+  displayName: string;
+  email: string;
+  photoURL: string;
+  role: RoleKey;
+};
+
+const fallbackRoleOptions: RoleKey[] = [
+  "Administrador",
+  "Usuario",
+  "Creador BIM",
+  "Fabricante",
+  "Empresa",
+  "Instructor",
+];
+
+const emptyAdminUserDraft: AdminUserDraft = {
+  uid: "",
+  displayName: "",
+  email: "",
+  photoURL: "",
+  role: "Usuario",
+};
+
+type DbLoadKey = "access" | "catalog" | "objects" | "plans" | "users";
 
 const catalogMeta: Record<
   CatalogKind,
@@ -386,6 +424,25 @@ const navigation: Array<{ label: string; path: string }> = [
   { label: "Galeria", path: "/galeria" },
 ];
 
+const moreMenuColumns = [
+  {
+    title: "Acerca de",
+    links: ["Sobre Nosotros", "Blog", "FAQ", "Que hay de nuevo", "Lo que viene"],
+  },
+  {
+    title: "Fabricantes",
+    links: ["Para Fabricantes", "Desarrollo Estrategico", "Publicacion Dirigida", "Marketing Personalizado", "Planes", "Preguntas Frecuentes"],
+  },
+  {
+    title: "Afiliados",
+    links: ["Para Afiliados", "Materiales Promocionales", "Politica de Promocion", "FAQ"],
+  },
+  {
+    title: "Terminos y politicas",
+    links: ["Terminos de uso", "Politica de privacidad", "Politica de Cookies"],
+  },
+];
+
 const searchKinds: CatalogKind[] = ["familias", "materiales", "colecciones", "marcas"];
 const categoryFilters = ["Todos", "Arquitectura", "Estructuras", "MEP", "Infraestructura"];
 const categories: Array<{ label: string; filter: string; Icon: LucideIcon }> = [
@@ -398,6 +455,33 @@ const categories: Array<{ label: string; filter: string; Icon: LucideIcon }> = [
   { label: "Cocinas", filter: "Cocinas", Icon: CookingPot },
   { label: "Estructuras", filter: "Estructuras", Icon: Building2 },
   { label: "Exterior", filter: "Exterior", Icon: Trees },
+];
+
+const heroSlides = [
+  {
+    eyebrow: "Biblioteca BIM para Latinoamerica",
+    title: "Dale vida a tus proyectos con familias BIM listas para Revit.",
+    description:
+      "Busca, guarda, publica y descarga objetos con metadatos tecnicos, visor 3D y respaldo seguro para tus equipos.",
+  },
+  {
+    eyebrow: "Recursos en multiples formatos",
+    title: "Encuentra RFA, RVT, IFC, DWG, PDF, ZIP y contenido OpenBIM.",
+    description:
+      "Filtra por disciplina, fabricante, licencia o version de Revit para llegar mas rapido al archivo correcto.",
+  },
+  {
+    eyebrow: "Plugin InfraBIM para Revit",
+    title: "Descarga desde la web o inserta familias directo en tu modelo.",
+    description:
+      "El plugin conecta tu sesion con el catalogo y recursos protegidos para trabajar sin salir de Revit.",
+  },
+  {
+    eyebrow: "Biblioteca viva y ordenada",
+    title: "Organiza colecciones, materiales y proyectos reales en un solo hub.",
+    description:
+      "Cada publicacion puede incluir miniaturas, archivos adjuntos, colecciones y contador real de descargas.",
+  },
 ];
 
 const products: Product[] = [
@@ -565,6 +649,8 @@ const footerGroups = [
 const DEFAULT_GOOGLE_DRIVE_ROOT_FOLDER_ID = "1rgmaezSy8mEwkYi0RTqHSne1fLue1p6U";
 const driveFolderId = import.meta.env.VITE_GOOGLE_DRIVE_ROOT_FOLDER_ID || DEFAULT_GOOGLE_DRIVE_ROOT_FOLDER_ID;
 const firebaseProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || "infrabimss";
+const pluginInstallerZipName = "InfraBIM_Plugin_Installer_v1.0.0.zip";
+const pluginInstallerZipUrl = "/downloads/" + pluginInstallerZipName;
 
 function OtpInputBoxes({
   value,
@@ -698,7 +784,7 @@ function ImageCarousel({ images, alt }: { images: string[]; alt: string }) {
             onClick={() => setActiveIndex(idx)}
             type="button"
           >
-            <img alt={`Miniatura ${idx + 1}`} src={img} />
+            <img alt={`Miniatura ${idx + 1} de ${alt}`} src={img} loading="lazy" />
           </button>
         ))}
       </div>
@@ -943,7 +1029,55 @@ function downloadsScore(value: string) {
     return 0;
   }
 
+  if (normalized.includes("M")) {
+    return number * 1000000;
+  }
+
   return normalized.includes("K") ? number * 1000 : number;
+}
+
+function formatDownloads(value: string) {
+  const score = downloadsScore(value || "0");
+
+  if (score >= 1000000) {
+    return String(Number((score / 1000000).toFixed(score >= 10000000 ? 0 : 1))) + "M";
+  }
+
+  if (score >= 1000) {
+    return String(Number((score / 1000).toFixed(score >= 10000 ? 0 : 1))) + "K";
+  }
+
+  return String(Math.max(0, Math.round(score)));
+}
+
+function getLinkedAssetCount(product: CatalogProduct) {
+  return (product.attachedFiles?.length || 0) + (product.images?.length || 0) + (product.glbUrl ? 1 : 0);
+}
+
+function mergeDriveFilePayloads(existing: DriveFilePayload[] = [], additions: DriveFilePayload[] = []) {
+  const seen = new Set<string>();
+  const merged: DriveFilePayload[] = [];
+
+  [...existing, ...additions].forEach((file) => {
+    const key = (file.id || file.webViewLink || file.name).trim().toLowerCase();
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    merged.push(file);
+  });
+
+  return merged;
+}
+
+function getRealDownloadSeed(product: CatalogProduct) {
+  const raw = (product.downloads || "0").trim();
+  const isLegacyBulkSeed = raw === "1.2K" && product.description.toLowerCase().includes("subida masivamente");
+  return isLegacyBulkSeed ? "0" : raw;
+}
+
+function getDownloadLabel(product: CatalogProduct) {
+  return formatDownloads(getRealDownloadSeed(product));
 }
 
 function toPayload(product: Product): BimObjectPayload {
@@ -1016,6 +1150,9 @@ export default function App() {
   const [remoteCatalog, setRemoteCatalog] = useState<CatalogProduct[]>([]);
   const [searchKind, setSearchKind] = useState<CatalogKind>(() => searchKindFromRoute(window.location.pathname) ?? "familias");
   const [searchMenuOpen, setSearchMenuOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [openCatalogMenu, setOpenCatalogMenu] = useState<"" | "sort" | "resource" | "maker" | "advanced">("");
+  const [heroSlideIndex, setHeroSlideIndex] = useState(0);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileDraft, setProfileDraft] = useState({ displayName: "", photoURL: "" });
@@ -1024,8 +1161,14 @@ export default function App() {
   const [gestionarSearch, setGestionarSearch] = useState("");
   const [gestionarKindFilter, setGestionarKindFilter] = useState<"todos" | CatalogKind>("todos");
   const [gestionarStatusFilter, setGestionarStatusFilter] = useState<"todos" | "activos" | "archivados">("todos");
+  const [adminUsers, setAdminUsers] = useState<UserProfile[]>([]);
+  const [adminUserSearch, setAdminUserSearch] = useState("");
+  const [adminUserRoleFilter, setAdminUserRoleFilter] = useState<"todos" | RoleKey>("todos");
+  const [editingAdminUserUid, setEditingAdminUserUid] = useState("");
+  const [adminUserDraft, setAdminUserDraft] = useState<AdminUserDraft>(emptyAdminUserDraft);
   const [user, setUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<RoleKey>("Usuario");
+  const [userSubscription, setUserSubscription] = useState<UserSubscription | null>(null);
   const [accessControl, setAccessControl] = useState<AccessControl | null>(null);
   const [language, setLanguage] = useState<"ES" | "EN">("ES");
   const [theme, setTheme] = useState<"light" | "dark">(() => {
@@ -1042,6 +1185,14 @@ export default function App() {
   function toggleTheme() {
     setTheme((prev) => (prev === "light" ? "dark" : "light"));
   }
+
+  useEffect(() => {
+    const slider = window.setInterval(() => {
+      setHeroSlideIndex((index) => (index + 1) % heroSlides.length);
+    }, 5600);
+
+    return () => window.clearInterval(slider);
+  }, []);
 
   useEffect(() => {
     if (!accountMenuOpen) {
@@ -1081,6 +1232,14 @@ export default function App() {
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 3500);
+  }
+
+  async function syncUserAccess(currentUser: User) {
+    const access = await initializeUserAccess(currentUser);
+    setAccessControl(access.access);
+    setUserRole(access.role);
+    setUserSubscription(access.subscription ?? null);
+    return access;
   }
 
   // Favorites state with persistence
@@ -1147,16 +1306,201 @@ export default function App() {
     return "";
   }
 
-  function handleDownloadOrInsert(product: CatalogProduct) {
+  async function requireDownloadSession(): Promise<User | null> {
+    if (user) {
+      return user;
+    }
+
+    showToast("Inicia sesion para descargar archivos de InfraBIM.", "info");
+    return await connectGoogleAccount();
+  }
+
+  async function registerCatalogDownload(product: CatalogProduct) {
+    if (!isFirebaseConfigured || product.source !== "firestore") {
+      return;
+    }
+
+    try {
+      const nextDownloads = await incrementCatalogDownload(product.kind, product.slug, getRealDownloadSeed(product));
+      setRemoteCatalog((current) =>
+        current.map((item) =>
+          item.kind === product.kind && item.slug === product.slug ? { ...item, downloads: nextDownloads } : item,
+        ),
+      );
+      setRemoteCatalogRaw((current) =>
+        current.map((item) =>
+          item.kind === product.kind && item.slug === product.slug ? { ...item, downloads: nextDownloads } : item,
+        ),
+      );
+    } catch (error) {
+      console.warn("No se pudo actualizar el contador de descargas", error);
+    }
+  }
+
+  function openDownloadLink(link: string) {
+    window.open(link, "_blank", "noopener,noreferrer");
+  }
+
+  async function openProtectedDownload(product: CatalogProduct, link: string, label = "archivo") {
+    const signedUser = await requireDownloadSession();
+
+    if (!signedUser) {
+      return;
+    }
+
+    if (!link) {
+      showToast(`No se encontro enlace de descarga para ${product.name}.`, "error");
+      return;
+    }
+
+    await registerCatalogDownload(product);
+    openDownloadLink(link);
+    showToast(`Abriendo ${label} de ${product.name}.`, "info");
+  }
+
+  async function ensureDriveDownloadToken(): Promise<string> {
+    const savedToken = driveToken || sessionStorage.getItem("infrabim_drive_token") || "";
+    if (savedToken) {
+      return savedToken;
+    }
+
+    const signedUser = await connectGoogleAccount();
+    if (!signedUser) {
+      return "";
+    }
+
+    return sessionStorage.getItem("infrabim_drive_token") || "";
+  }
+
+  function collectLinkedDriveFiles(product: CatalogProduct) {
+    const candidates: Array<{ id: string; name: string }> = [];
+    const pushCandidate = (id: string | null | undefined, name: string) => {
+      if (!id) return;
+      candidates.push({ id, name: sanitizeZipPath(name) });
+    };
+
+    (product.attachedFiles || []).forEach((file) => pushCandidate(file.id || extractGoogleDriveFileId(file.webViewLink || ""), file.name));
+    (product.images || []).forEach((imageUrl, index) =>
+      pushCandidate(extractGoogleDriveFileId(imageUrl), "imagenes/portada-" + String(index + 1).padStart(2, "0") + ".jpg"),
+    );
+    pushCandidate(extractGoogleDriveFileId(product.glbUrl || ""), "modelo-3d/" + product.slug + ".glb");
+
+    return candidates;
+  }
+
+  function uniqueZipName(name: string, usedNames: Set<string>) {
+    const cleanName = sanitizeZipPath(name);
+    if (!usedNames.has(cleanName.toLowerCase())) {
+      usedNames.add(cleanName.toLowerCase());
+      return cleanName;
+    }
+
+    const lastSlash = cleanName.lastIndexOf("/");
+    const folder = lastSlash >= 0 ? cleanName.slice(0, lastSlash + 1) : "";
+    const fileName = lastSlash >= 0 ? cleanName.slice(lastSlash + 1) : cleanName;
+    const dotIndex = fileName.lastIndexOf(".");
+    const baseName = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
+    const ext = dotIndex > 0 ? fileName.slice(dotIndex) : "";
+    let index = 2;
+    let candidate = folder + baseName + "-" + index + ext;
+
+    while (usedNames.has(candidate.toLowerCase())) {
+      index += 1;
+      candidate = folder + baseName + "-" + index + ext;
+    }
+
+    usedNames.add(candidate.toLowerCase());
+    return candidate;
+  }
+
+  function downloadBlobAsFile(blob: Blob, fileName: string) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+
+  async function downloadAllSelectedFiles(product: CatalogProduct = selectedProduct) {
+    const signedUser = await requireDownloadSession();
+
+    if (!signedUser) {
+      return;
+    }
+
+    setBusy("download-zip");
+    try {
+      const token = await ensureDriveDownloadToken();
+      if (!token) {
+        showToast("Autoriza el acceso a tus archivos para preparar el ZIP.", "error");
+        return;
+      }
+
+      setConnectionLog("Preparando ZIP de " + product.name + "...");
+      let driveFiles = product.driveFolderId
+        ? await listDriveFolderFilesRecursiveClient(token, product.driveFolderId)
+        : [];
+
+      if (driveFiles.length === 0) {
+        driveFiles = collectLinkedDriveFiles(product).map((file) => ({
+          id: file.id,
+          name: file.name,
+          path: file.name,
+        }));
+      }
+
+      if (driveFiles.length === 0) {
+        showToast("No se encontraron archivos en Drive para comprimir.", "error");
+        return;
+      }
+
+      const usedNames = new Set<string>();
+      const zipFiles: ZipSourceFile[] = [];
+
+      for (let index = 0; index < driveFiles.length; index += 1) {
+        const file = driveFiles[index];
+        setConnectionLog("Agregando al ZIP (" + (index + 1) + "/" + driveFiles.length + "): " + (file.path || file.name));
+        const blob = await downloadDriveFileBlobClient(token, file.id);
+        zipFiles.push({
+          name: uniqueZipName(file.path || file.name, usedNames),
+          blob,
+        });
+      }
+
+      const zipBlob = await createStoredZip(zipFiles);
+      downloadBlobAsFile(zipBlob, product.slug + "-infrabim.zip");
+      await registerCatalogDownload(product);
+      setConnectionLog("ZIP generado para " + product.name + " con " + zipFiles.length + " archivo(s).");
+      showToast("Descargando ZIP de " + product.name + ".", "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo generar el ZIP.";
+      setConnectionLog(message);
+      showToast(message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleDownloadOrInsert(product: CatalogProduct) {
+    const signedUser = await requireDownloadSession();
+
+    if (!signedUser) {
+      return;
+    }
+
     const familyUrl = getBestFamilyDownloadUrl(product);
 
     // @ts-ignore
     if (window.chrome?.webview) {
       if (!familyUrl) {
-        showToast(`La familia '${product.name}' no tiene un archivo RFA asignado en la base de datos.`, "error");
+        showToast(`La familia ${product.name} no tiene un archivo RFA asignado en la base de datos.`, "error");
         return;
       }
 
+      await registerCatalogDownload(product);
       // Comunicar con C# mediante WebView2 en Revit
       // @ts-ignore
       window.chrome.webview.postMessage({
@@ -1164,13 +1508,12 @@ export default function App() {
         familyUrl: familyUrl,
         familyName: product.name,
       });
-      showToast(`Descargando '${product.name}' para insertar en Revit 🚀`, "success");
+      showToast(`Descargando ${product.name} para insertar en Revit`, "success");
     } else if (familyUrl || product.driveFolderLink) {
       const linkToOpen = familyUrl || product.driveFolderLink || "";
-      window.open(linkToOpen, "_blank");
-      showToast(`Abriendo enlace de descarga para ${product.name}`, "info");
+      await openProtectedDownload(product, linkToOpen, "enlace de descarga");
     } else {
-      showToast(`No se encontró enlace de descarga configurado para ${product.name}`, "error");
+      showToast(`No se encontro enlace de descarga configurado para ${product.name}`, "error");
     }
   }
 
@@ -1489,9 +1832,10 @@ export default function App() {
     catalog: isFirebaseConfigured,
     objects: false,
     plans: isFirebaseConfigured,
+    users: false,
   });
   const [busy, setBusy] = useState("");
-  const [adminTab, setAdminTab] = useState<"resumen" | "gestionar" | "crear" | "precios" | "permisos">("resumen");
+  const [adminTab, setAdminTab] = useState<"resumen" | "usuarios" | "gestionar" | "crear" | "precios" | "permisos">("resumen");
   const [connectionLog, setConnectionLog] = useState(
     isFirebaseConfigured
       ? "Firebase listo para autenticar, publicar objetos y enlazar Drive."
@@ -1499,6 +1843,11 @@ export default function App() {
   );
 
   const isAdmin = userRole === "Administrador";
+
+  const adminRoleOptions = useMemo<RoleKey[]>(() => {
+    const accessRoles = accessControl ? (Object.keys(accessControl.roles) as RoleKey[]) : [];
+    return accessRoles.length > 0 ? accessRoles : fallbackRoleOptions;
+  }, [accessControl]);
 
   const catalogItems = useMemo(() => {
     const demoItems = products.map((product) => productToCatalog(product));
@@ -1508,6 +1857,11 @@ export default function App() {
 
   const homeProjectItems = useMemo(
     () => catalogItems.filter((item) => item.kind === "proyectos").slice(0, 3),
+    [catalogItems],
+  );
+
+  const homeCollectionItems = useMemo(
+    () => catalogItems.filter((item) => item.kind === "colecciones").slice(0, 3),
     [catalogItems],
   );
 
@@ -1526,6 +1880,25 @@ export default function App() {
     return Array.from(counts, ([name, count]) => ({ name, count })).sort((first, second) =>
       second.count - first.count || first.name.localeCompare(second.name, "es", { sensitivity: "base" }),
     );
+  }, [catalogItems]);
+
+  const resourceFilterOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const orderedOptions = [
+      ...categoryFilters,
+      ...categories.map((item) => item.filter),
+      ...catalogItems.flatMap((item) => [item.discipline, item.category]),
+    ];
+
+    return orderedOptions.filter((option) => {
+      const key = option.trim().toLowerCase();
+      if (!key || seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    });
   }, [catalogItems]);
 
   const [routeKind, routeSlug] = route.split("/").filter(Boolean) as [CatalogKind | undefined, string | undefined];
@@ -1601,10 +1974,14 @@ export default function App() {
     catalogItems.find((product) => product.id === selectedId) ??
     filteredProducts[0] ??
     productToCatalog(products[0]);
+  const activeHeroSlide = heroSlides[heroSlideIndex];
   const isAdminPage = route === "/admin";
   const isPlansPage = route === "/planes";
+  const isPluginPage = route === "/plugin-revit";
   const accountDisplayName = user?.displayName || user?.email?.split("@")[0] || "Usuario InfraBIM";
-  const accountPlanLabel = userRole === "Administrador" ? "Administrador" : userRole === "Fabricante" ? "Fabricante" : "Free";
+  const hasActivePlan = isActiveUserSubscription(userSubscription);
+  const paidPlanLabel = userSubscription?.planId ? paymentPlans[userSubscription.planId]?.label : "Plan activo";
+  const accountPlanLabel = userRole === "Administrador" ? "Administrador" : hasActivePlan ? paidPlanLabel : userRole === "Fabricante" ? "Fabricante" : "Free";
   const accountInitial = accountDisplayName.trim().charAt(0).toUpperCase() || "U";
   const headerNotifications = useMemo(() => {
     const notices: string[] = [];
@@ -1628,6 +2005,37 @@ export default function App() {
     return notices;
   }, [catalogError, dbLoading.access, dbLoading.catalog, dbLoading.plans, paymentPlansError]);
 
+  function getSubscriptionExpiryTime(value: unknown) {
+    if (!value) {
+      return null;
+    }
+
+    if (typeof value === "object") {
+      const maybeTimestamp = value as { seconds?: number; toDate?: () => Date };
+      if (typeof maybeTimestamp.toDate === "function") {
+        return maybeTimestamp.toDate().getTime();
+      }
+      if (typeof maybeTimestamp.seconds === "number") {
+        return maybeTimestamp.seconds * 1000;
+      }
+    }
+
+    const parsed = new Date(String(value)).getTime();
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+
+  function isActiveUserSubscription(subscription: UserSubscription | null) {
+    const status = String(subscription?.status || "").toLowerCase();
+    const isActiveStatus = status === "active" || status === "approved" || status === "authorized";
+    const expiresAtTime = getSubscriptionExpiryTime(subscription?.expiresAt);
+
+    if (!isActiveStatus) {
+      return false;
+    }
+
+    return !expiresAtTime || expiresAtTime > Date.now();
+  }
+
   function setDatabaseLoading(key: DbLoadKey, value: boolean) {
     setDbLoading((current) => ({ ...current, [key]: value }));
   }
@@ -1643,25 +2051,37 @@ export default function App() {
       if (!currentUser) {
         setAccessControl(null);
         setUserRole("Usuario");
+        setUserSubscription(null);
+        setAdminUsers([]);
+        setEditingAdminUserUid("");
+        setAdminUserDraft(emptyAdminUserDraft);
         setRemoteObjects(null);
         setDatabaseLoading("access", false);
         setDatabaseLoading("objects", false);
+        setDatabaseLoading("users", false);
         return;
       }
 
       setDatabaseLoading("access", true);
       setDatabaseLoading("objects", true);
+      setDatabaseLoading("users", true);
       try {
-        const access = await initializeUserAccess(currentUser);
-        setAccessControl(access.access);
-        setUserRole(access.role);
+        const access = await syncUserAccess(currentUser);
         const objects = await fetchBimObjects();
         setRemoteObjects(objects.length);
+
+        if (access.role === "Administrador") {
+          const users = await fetchUsers();
+          setAdminUsers(users);
+        } else {
+          setAdminUsers([]);
+        }
       } catch (error) {
         setConnectionLog(error instanceof Error ? error.message : "No se pudo leer Firestore.");
       } finally {
         setDatabaseLoading("access", false);
         setDatabaseLoading("objects", false);
+        setDatabaseLoading("users", false);
       }
     });
   }, []);
@@ -1671,6 +2091,7 @@ export default function App() {
     void refreshPaymentPlans();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
 
   useEffect(() => {
     function syncRoute() {
@@ -1725,8 +2146,10 @@ export default function App() {
             planId: checkout.planId,
           });
           const label = paymentPlans[checkout.planId].label;
+          await syncUserAccess(user);
           setCheckoutStatus(`Suscripcion ${label} registrada: ${response.status ?? "pendiente"}.`);
           setConnectionLog(`Mercado Pago registro la suscripcion ${response.id ?? label}.`);
+          showToast(`Plan ${label} vinculado a tu cuenta.`, "success");
         } catch (error) {
           const message = error instanceof Error ? error.message : "No se pudo crear la suscripcion.";
           setCheckoutStatus(message);
@@ -1772,7 +2195,25 @@ export default function App() {
     }
 
     setRoute(normalizedPath);
-    window.scrollTo({ behavior: "smooth", top: 0 });
+    setOpenCatalogMenu("");
+    setMoreMenuOpen(false);
+    window.scrollTo({ behavior: "smooth", left: 0, top: 0 });
+  }
+
+  function goHome() {
+    const normalizedHome = "/";
+
+    if (normalizeRoute(window.location.pathname) !== normalizedHome) {
+      window.history.pushState({}, "", normalizedHome);
+    }
+
+    setRoute(normalizedHome);
+    setSearchKind("familias");
+    setSearchMenuOpen(false);
+    setAccountMenuOpen(false);
+    setOpenCatalogMenu("");
+    setMoreMenuOpen(false);
+    window.requestAnimationFrame(() => window.scrollTo({ behavior: "auto", left: 0, top: 0 }));
   }
 
   function goToAdmin() {
@@ -1781,6 +2222,46 @@ export default function App() {
 
   function goToPlans() {
     navigateTo("/planes");
+  }
+
+  function goToPluginPage() {
+    navigateTo("/plugin-revit");
+  }
+
+  async function downloadPluginInstaller() {
+    const signedUser = await requireDownloadSession();
+
+    if (!signedUser) {
+      return;
+    }
+
+    const anchor = document.createElement("a");
+    anchor.href = pluginInstallerZipUrl;
+    anchor.download = pluginInstallerZipName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+
+    setConnectionLog("Descargando instalador ZIP de InfraBIM para Revit.");
+    showToast("Descargando instalador del plugin.", "success");
+  }
+
+  async function refreshAdminUsers() {
+    if (!isFirebaseConfigured || !isAdmin) {
+      return;
+    }
+
+    setDatabaseLoading("users", true);
+    try {
+      const users = await fetchUsers();
+      setAdminUsers(users);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudieron cargar los usuarios.";
+      setConnectionLog(message);
+      showToast(message, "error");
+    } finally {
+      setDatabaseLoading("users", false);
+    }
   }
 
   async function refreshCatalogItems() {
@@ -1832,6 +2313,25 @@ export default function App() {
       return matchesKind && matchesStatus && matchesSearch;
     });
   }, [remoteCatalogRaw, gestionarKindFilter, gestionarStatusFilter, gestionarSearch]);
+
+  const filteredAdminUsers = useMemo(() => {
+    return adminUsers.filter((profile) => {
+      const matchesRole = adminUserRoleFilter === "todos" || profile.role === adminUserRoleFilter;
+      const searchableText = [
+        profile.displayName,
+        profile.email,
+        profile.uid,
+        profile.role,
+        profile.subscription?.planId,
+        profile.subscription?.status,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const matchesSearch = !adminUserSearch.trim() || matchesBilingualSearch(adminUserSearch, searchableText);
+
+      return matchesRole && matchesSearch;
+    });
+  }, [adminUsers, adminUserRoleFilter, adminUserSearch]);
 
   function handleEditCatalogItem(item: CatalogItemPayload) {
     setCatalogDraft({
@@ -1953,6 +2453,118 @@ export default function App() {
     }
   }
 
+  function getAdminUserLabel(profile: UserProfile) {
+    return profile.displayName?.trim() || profile.email?.trim() || profile.uid;
+  }
+
+  function beginEditAdminUser(profile: UserProfile) {
+    setEditingAdminUserUid(profile.uid);
+    setAdminUserDraft({
+      uid: profile.uid,
+      displayName: profile.displayName || "",
+      email: profile.email || "",
+      photoURL: profile.photoURL || "",
+      role: profile.role || "Usuario",
+    });
+  }
+
+  function cancelEditAdminUser() {
+    setEditingAdminUserUid("");
+    setAdminUserDraft(emptyAdminUserDraft);
+  }
+
+  async function persistAdminUserDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!adminUserDraft.uid) {
+      return;
+    }
+
+    const nextProfile: UserProfile = {
+      uid: adminUserDraft.uid,
+      displayName: adminUserDraft.displayName.trim() || null,
+      email: adminUserDraft.email.trim() || null,
+      photoURL: adminUserDraft.photoURL.trim() || null,
+      role: adminUserDraft.role,
+    };
+
+    setBusy(`user-${nextProfile.uid}`);
+    try {
+      await saveUserProfile(nextProfile);
+
+      if (user?.uid === nextProfile.uid && user) {
+        await updateProfile(user, {
+          displayName: nextProfile.displayName || null,
+          photoURL: nextProfile.photoURL || null,
+        });
+        setUser(auth?.currentUser ?? user);
+        setUserRole(nextProfile.role);
+      }
+
+      await refreshAdminUsers();
+      cancelEditAdminUser();
+      setConnectionLog(`Usuario ${getAdminUserLabel(nextProfile)} actualizado.`);
+      showToast("Usuario actualizado.", "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo guardar el usuario.";
+      setConnectionLog(message);
+      showToast(message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleQuickUserRoleChange(profile: UserProfile, role: RoleKey) {
+    if (profile.role === role) {
+      return;
+    }
+
+    if (profile.uid === user?.uid) {
+      showToast("No puedes cambiar tu propio rol desde esta tabla.", "error");
+      return;
+    }
+
+    setBusy(`user-${profile.uid}`);
+    try {
+      await saveUserProfile({ ...profile, role });
+      await refreshAdminUsers();
+      setConnectionLog(`${getAdminUserLabel(profile)} ahora tiene rol ${role}.`);
+      showToast("Rol actualizado.", "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo actualizar el rol.";
+      setConnectionLog(message);
+      showToast(message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleDeleteAdminUser(profile: UserProfile) {
+    if (profile.uid === user?.uid) {
+      showToast("No puedes eliminar tu propio usuario desde el panel.", "error");
+      return;
+    }
+
+    const label = getAdminUserLabel(profile);
+    if (!window.confirm(`Eliminar el perfil de app de "${label}"? Esto no borra la cuenta en Firebase Auth.`)) {
+      return;
+    }
+
+    setBusy(`user-${profile.uid}`);
+    try {
+      await deleteUserProfile(profile.uid);
+      await refreshAdminUsers();
+      setConnectionLog(`Perfil de usuario ${label} eliminado de Firestore.`);
+      showToast("Usuario eliminado del panel.", "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo eliminar el usuario.";
+      setConnectionLog(message);
+      showToast(message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function refreshPaymentPlans() {
     if (!isFirebaseConfigured) {
       return;
@@ -1978,6 +2590,7 @@ export default function App() {
   }
 
   function scrollTo(section: string) {
+    setMoreMenuOpen(false);
     const currentTarget = document.getElementById(section);
 
     if (currentTarget) {
@@ -2009,11 +2622,11 @@ export default function App() {
     scrollTo("detalle");
   }
 
-  async function connectGoogleAccount() {
+  async function connectGoogleAccount(): Promise<User | null> {
     if (!auth) {
       setConnectionLog("Configura Firebase antes de iniciar sesion.");
       showToast("Configura Firebase antes de iniciar sesion.", "error");
-      return;
+      return null;
     }
 
     setBusy("auth");
@@ -2023,19 +2636,37 @@ export default function App() {
       const result = await signInWithPopup(auth, googleProvider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       const accessToken = credential?.accessToken ?? "";
+      const isFirstLogin = Boolean(getAdditionalUserInfo(result)?.isNewUser);
+      const displayName = result.user.displayName || result.user.email || "usuario";
       setUser(result.user);
       setDriveToken(accessToken);
-      const access = await initializeUserAccess(result.user);
-      setAccessControl(access.access);
-      setUserRole(access.role);
+      if (accessToken) {
+        sessionStorage.setItem("infrabim_drive_token", accessToken);
+        sessionStorage.setItem("infrabim_drive_token_time", String(Date.now()));
+      }
+      const access = await syncUserAccess(result.user);
+      if (access.role === "Administrador") {
+        const users = await fetchUsers();
+        setAdminUsers(users);
+      } else {
+        setAdminUsers([]);
+      }
 
       if (accessToken) {
         const files = await listDriveFiles(accessToken, driveFolderId);
         setDriveFiles(files);
       }
 
-      setConnectionLog("Sesion Google conectada con Firebase Auth, Firestore y Drive.");
-      showToast(`¡Bienvenido, ${result.user.displayName || result.user.email}!`, "success");
+      setConnectionLog(
+        isFirstLogin
+          ? "Primera sesion creada en InfraBIM. Tu biblioteca ya esta lista."
+          : "Sesion conectada con InfraBIM.",
+      );
+      showToast(
+        isFirstLogin ? `Bienvenido a InfraBIM, ${displayName}. Tu cuenta ya esta lista.` : `Hola de nuevo, ${displayName}.`,
+        "success",
+      );
+      return result.user;
     } catch (error) {
       console.error("Firebase Auth Error:", error);
       const errCode = (error as any)?.code || "";
@@ -2049,6 +2680,7 @@ export default function App() {
         setConnectionLog(errMsg || "No se pudo conectar Google.");
         showToast(errMsg || "No se pudo iniciar sesión con Google.", "error");
       }
+      return null;
     } finally {
       setDatabaseLoading("access", false);
       setBusy("");
@@ -2062,6 +2694,10 @@ export default function App() {
     setUser(null);
     setAccessControl(null);
     setUserRole("Usuario");
+    setUserSubscription(null);
+    setAdminUsers([]);
+    setEditingAdminUserUid("");
+    setAdminUserDraft(emptyAdminUserDraft);
     setDriveToken("");
     setDriveFiles([]);
     setConnectionLog("Sesion cerrada.");
@@ -2434,9 +3070,7 @@ export default function App() {
       !catalogDraft.imageUrl.trim() &&
       (!catalogDraft.existingImages || catalogDraft.existingImages.length === 0)
     ) {
-      setConnectionLog("Debes seleccionar al menos 1 imagen de portada o colocar una URL.");
-      alert("Debes seleccionar al menos 1 imagen de portada o colocar una URL.");
-      return;
+      setConnectionLog("Sin imagen de portada: se usara una portada automatica InfraBIM.");
     }
 
     setBusy("create");
@@ -2470,8 +3104,14 @@ export default function App() {
         const cleanName = String(catalogDraft.name).trim().replace(/[\\/:*?"<>|]/g, "_");
         const folderName = `${cleanName} - ${slug}`;
 
-        setConnectionLog("Creando subcarpeta en tu Google Drive via API OAuth 2.0...");
-        const folder = await createDriveFolderClient(currentDriveToken, folderName, driveFolderId);
+        const folder = catalogDraft.existingDriveFolderId
+          ? {
+              id: catalogDraft.existingDriveFolderId,
+              name: folderName,
+              webViewLink: catalogDraft.existingDriveFolderLink || "https://drive.google.com/drive/folders/" + catalogDraft.existingDriveFolderId,
+            }
+          : await getOrCreateDriveFolderClient(currentDriveToken, folderName, driveFolderId);
+        setConnectionLog(catalogDraft.existingDriveFolderId ? "Reutilizando carpeta existente en Google Drive..." : "Creando subcarpeta en tu Google Drive via API OAuth 2.0...");
         uploadedDriveFolderId = folder.id;
         uploadedDriveFolderLink = folder.webViewLink || `https://drive.google.com/drive/folders/${folder.id}`;
 
@@ -2550,9 +3190,7 @@ export default function App() {
       const finalGlbUrl = uploadedGlbUrl || catalogDraft.existingGlbUrl || "";
       const finalDriveFolderId = uploadedDriveFolderId || catalogDraft.existingDriveFolderId || "";
       const finalDriveFolderLink = uploadedDriveFolderLink || catalogDraft.existingDriveFolderLink || "";
-      const finalAttachedFiles = uploadedAttachedFiles.length > 0
-        ? [...(catalogDraft.existingAttachedFiles || []), ...uploadedAttachedFiles]
-        : (catalogDraft.existingAttachedFiles || []);
+      const finalAttachedFiles = mergeDriveFilePayloads(catalogDraft.existingAttachedFiles || [], uploadedAttachedFiles);
 
       const item: CatalogItemPayload = {
         id: `${catalogDraft.kind}-${slug}`,
@@ -3057,16 +3695,16 @@ export default function App() {
         sessionStorage.setItem("infrabim_drive_token", currentDriveToken);
       }
 
-      async function createDriveFolderForBulk(
+      async function getOrCreateDriveFolderForBulk(
         name: string,
         parentFolderId?: string
-      ): Promise<{ id: string; name: string; webViewLink?: string }> {
+      ): Promise<{ id: string; name: string; webViewLink?: string; reused: boolean }> {
         try {
-          return await createDriveFolderClient(currentDriveToken, name, parentFolderId);
+          return await getOrCreateDriveFolderClient(currentDriveToken, name, parentFolderId);
         } catch (err: any) {
           if (err?.message?.includes("401")) {
             await refreshDriveTokenForBulk();
-            return createDriveFolderClient(currentDriveToken, name, parentFolderId);
+            return getOrCreateDriveFolderClient(currentDriveToken, name, parentFolderId);
           }
           throw err;
         }
@@ -3102,7 +3740,7 @@ export default function App() {
             continue;
           }
 
-          const folder = await createDriveFolderForBulk(folderName, currentParentId);
+          const folder = await getOrCreateDriveFolderForBulk(folderName, currentParentId);
           driveFolderPathCache.set(cacheKey, folder.id);
           currentParentId = folder.id;
         }
@@ -3133,10 +3771,25 @@ export default function App() {
         const slug = slugify(cleanName);
         const docId = "familias-" + slug;
 
-        setConnectionLog("[" + (fIdx + 1) + "/" + itemsToUpload.length + "] Creando subcarpeta en Google Drive: " + cleanName + "...");
+        const existingCatalogItem = catalogItems.find((catalogItem) => catalogItem.kind === "familias" && catalogItem.slug === slug);
+        const existingDriveFolderId = existingCatalogItem?.driveFolderId || "";
+        const existingDriveFolderLink = existingCatalogItem?.driveFolderLink || "";
+
+        setConnectionLog(
+          "[" + (fIdx + 1) + "/" + itemsToUpload.length + "] " +
+            (existingDriveFolderId ? "Reutilizando carpeta de Google Drive: " : "Preparando carpeta en Google Drive: ") +
+            cleanName + "...",
+        );
 
         try {
-          const driveFolder = await createDriveFolderForBulk(cleanName + " - " + slug, envRootFolderId);
+          const driveFolder = existingDriveFolderId
+            ? {
+                id: existingDriveFolderId,
+                name: cleanName + " - " + slug,
+                webViewLink: existingDriveFolderLink || "https://drive.google.com/drive/folders/" + existingDriveFolderId,
+                reused: true,
+              }
+            : await getOrCreateDriveFolderForBulk(cleanName + " - " + slug, envRootFolderId);
 
           setBulkProgressList((prev) =>
             prev.map((p, idx) =>
@@ -3145,7 +3798,7 @@ export default function App() {
                     ...p,
                     progress: Math.max(p.progress, 3),
                     driveFolderLink: driveFolder.webViewLink || "https://drive.google.com/drive/folders/" + driveFolder.id,
-                    currentStep: "Subcarpeta creada. Iniciando archivos...",
+                    currentStep: driveFolder.reused ? "Carpeta existente detectada. Agregando archivos..." : "Subcarpeta creada. Iniciando archivos...",
                   }
                 : p
             )
@@ -3273,6 +3926,9 @@ export default function App() {
             throw new Error("No se subieron " + fileErrors.length + " archivo(s): " + fileErrors.slice(0, 3).join("; "));
           }
 
+          const mergedImages = Array.from(new Set([...(existingCatalogItem?.images || []), ...uploadedImages]));
+          const mergedAttached = mergeDriveFilePayloads(existingCatalogItem?.attachedFiles || [], uploadedAttached);
+          const fallbackDownloadProduct = existingCatalogItem || ({ ...productToCatalog(products[0]), downloads: "0", description: "" } as CatalogProduct);
           const payload: CatalogItemPayload = {
             id: docId,
             kind: "familias",
@@ -3286,21 +3942,21 @@ export default function App() {
             formats: item.formats,
             versions: ["2026", "2025", "2024", "2023"],
             price: "Gratis",
-            downloads: "1.2K",
+            downloads: getRealDownloadSeed(fallbackDownloadProduct),
             tags: [item.maker, item.category, "BIM"],
             specs: ["Archivos incluidos: " + item.formats.join(", "), "Compatibilidad: Revit 2020-2026"],
             description: "Familia BIM " + cleanName + " de la marca " + item.maker + " subida masivamente a Google Drive para Revit y OpenBIM.",
             visual: "box",
             feature: "Nuevo",
             isPremium: false,
-            imageUrl: uploadedImages[0] || "",
-            images: uploadedImages,
+            imageUrl: mergedImages[0] || "",
+            images: mergedImages,
             glbUrl: uploadedGlbUrl,
             has3D: Boolean(uploadedGlbUrl),
             hasAR: Boolean(uploadedGlbUrl),
             driveFolderId: driveFolder.id,
             driveFolderLink: driveFolder.webViewLink || "https://drive.google.com/drive/folders/" + driveFolder.id,
-            attachedFiles: uploadedAttached,
+            attachedFiles: mergedAttached,
             ownerUid: user?.uid || "",
             isArchived: false,
           };
@@ -3502,13 +4158,89 @@ export default function App() {
     setSelectedVersion("Todas");
     setSelectedPricing("Todos");
     setOnlyFavorites(false);
+    setOpenCatalogMenu("");
     navigateTo("/marcas");
     setConnectionLog("Filtro activo por fabricante: " + cleanMaker + ".");
   }
 
   function clearManufacturerFilter() {
     setSelectedMaker("");
+    setOpenCatalogMenu("");
     setConnectionLog("Filtro de fabricante removido.");
+  }
+
+  function toggleMoreMenu() {
+    setMoreMenuOpen((open) => !open);
+    setSearchMenuOpen(false);
+    setAccountMenuOpen(false);
+  }
+
+  function handleMoreMenuAction(label: string) {
+    setMoreMenuOpen(false);
+
+    const actionMap: Record<string, () => void> = {
+      "Sobre Nosotros": () => goToPluginPage(),
+      Blog: () => navigateTo("/galeria"),
+      FAQ: () => openFaqFromMenu(),
+      "Que hay de nuevo": () => navigateTo("/familias"),
+      "Lo que viene": () => goToPlans(),
+      "Para Fabricantes": () => navigateTo("/marcas"),
+      "Desarrollo Estrategico": () => navigateTo("/marcas"),
+      "Publicacion Dirigida": () => navigateTo("/marcas"),
+      "Marketing Personalizado": () => navigateTo("/marcas"),
+      Planes: () => goToPlans(),
+      "Preguntas Frecuentes": () => openFaqFromMenu(),
+      "Para Afiliados": () => navigateTo("/planes"),
+      "Materiales Promocionales": () => navigateTo("/materiales"),
+      "Politica de Promocion": () => navigateTo("/planes"),
+      "Terminos de uso": () => goToPlans(),
+      "Politica de privacidad": () => goToPlans(),
+      "Politica de Cookies": () => goToPlans(),
+    };
+
+    (actionMap[label] || (() => navigateTo("/familias")))();
+  }
+
+  function renderMoreNavMenu() {
+    return (
+      <div className="more-nav-wrap">
+        <button className={moreMenuOpen ? "more-nav-trigger is-open" : "more-nav-trigger"} onClick={toggleMoreMenu} type="button" aria-expanded={moreMenuOpen}>
+          Mas...
+          <ChevronDown aria-hidden="true" size={14} />
+        </button>
+        {moreMenuOpen && (
+          <div className="more-mega-menu">
+            <div className="more-mega-columns">
+              {moreMenuColumns.map((group) => (
+                <div className="more-mega-column" key={group.title}>
+                  <strong>{group.title}</strong>
+                  {group.links.map((link) => (
+                    <button key={group.title + link} onClick={() => handleMoreMenuAction(link)} type="button">
+                      {link}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <button className="more-news-card" onClick={() => navigateTo("/familias")} type="button">
+              <span className="more-news-visual" aria-hidden="true">
+                <span className="brand-cube mini-cloud">
+                  <span className="brand-layer brand-layer-top" />
+                  <span className="brand-layer brand-layer-glass" />
+                  <span className="brand-layer brand-layer-shadow" />
+                  <span className="brand-layer brand-layer-plan" />
+                </span>
+              </span>
+              <span>
+                <strong>Biblioteca BIM para Revit</strong>
+                <small>Formatos RFA, IFC, DWG y colecciones listas para descargar.</small>
+              </span>
+              <ArrowRight aria-hidden="true" size={16} />
+            </button>
+          </div>
+        )}
+      </div>
+    );
   }
 
   function handleFooterAction(label: string) {
@@ -3519,7 +4251,7 @@ export default function App() {
 
     const map: Record<string, string> = {
       Inicio: "inicio",
-      "Plugin Revit": "plugin",
+      "Plugin Revit": "/plugin-revit",
       Planes: "/planes",
       Familias: "/familias",
       Materiales: "/materiales",
@@ -3786,10 +4518,24 @@ export default function App() {
     );
   }
 
-  function toggleSortMode() {
-    const nextMode = sortMode === "recent" ? "popular" : "recent";
+  function toggleCatalogMenu(menu: "sort" | "resource" | "maker" | "advanced") {
+    setOpenCatalogMenu((current) => (current === menu ? "" : menu));
+  }
+
+  function selectResourceFilter(nextFilter: string) {
+    setFilter(nextFilter);
+    setOpenCatalogMenu("");
+    setConnectionLog(nextFilter === "Todos" ? "Filtro de recurso removido." : "Filtro activo por recurso: " + nextFilter + ".");
+  }
+
+  function chooseSortMode(nextMode: "recent" | "popular") {
     setSortMode(nextMode);
+    setOpenCatalogMenu("");
     setConnectionLog(nextMode === "popular" ? "Orden aplicado: mas descargados." : "Orden aplicado: recientes.");
+  }
+
+  function toggleSortMode() {
+    chooseSortMode(sortMode === "recent" ? "popular" : "recent");
   }
 
   function chooseBillingCycle(cycle: "mensual" | "anual") {
@@ -3835,6 +4581,46 @@ export default function App() {
       maximumFractionDigits: 2,
       minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
     })}`;
+  }
+
+  function describeYapePaymentStatus(
+    response: { status?: string; statusDetail?: string; id?: string },
+    label: string,
+  ) {
+    const status = String(response.status || "pending").toLowerCase();
+    const detail = String(response.statusDetail || "").toLowerCase();
+    const detailSuffix = detail ? " (" + detail + ")" : "";
+
+    if (status === "approved") {
+      return "Pago Yape " + label + ": aprobado.";
+    }
+
+    if (status === "pending" || status === "in_process") {
+      return "Pago Yape " + label + ": pendiente de confirmacion" + detailSuffix + ".";
+    }
+
+    if (status === "rejected") {
+      const rejectedMessages: Record<string, string> = {
+        cc_rejected_duplicated_payment: "Mercado Pago lo detecto como intento duplicado. Genera un codigo nuevo y espera unos minutos antes de reintentar.",
+        cc_rejected_high_risk: "Mercado Pago lo rechazo por seguridad. Usa una cuenta Yape distinta a la cuenta vendedora o prueba otro medio de pago.",
+        rejected_high_risk: "Mercado Pago lo rechazo por seguridad. Usa una cuenta Yape distinta a la cuenta vendedora o prueba otro medio de pago.",
+        cc_rejected_insufficient_amount: "La cuenta Yape no tiene saldo suficiente.",
+        insufficient_amount: "La cuenta Yape no tiene saldo suficiente.",
+        cc_rejected_max_attempts: "Se alcanzo el limite de intentos. Espera unos minutos y genera un codigo nuevo.",
+        cc_rejected_time_out: "Yape no respondio a tiempo. Genera un codigo nuevo e intenta otra vez.",
+        rejected_insufficient_data: "Mercado Pago necesita mas datos del pagador. Revisa celular, codigo y cuenta Yape.",
+        rejected_by_bank: "Yape rechazo la operacion. Revisa que el codigo este vigente y que el celular corresponda a la cuenta Yape.",
+        rejected_by_issuer: "Yape rechazo la operacion. Revisa que el codigo este vigente y que el celular corresponda a la cuenta Yape.",
+        cc_rejected_other_reason: "Yape no proceso el pago. Genera un codigo nuevo y evita pagar desde la misma cuenta vendedora.",
+        rejected_other_reason: "Yape no proceso el pago. Genera un codigo nuevo y evita pagar desde la misma cuenta vendedora.",
+        rejected_by_biz_rule: "Mercado Pago rechazo el intento por reglas de negocio. Prueba con otro pagador o medio de pago.",
+        rejected_by_regulations: "Mercado Pago rechazo el intento por regulaciones. Prueba con otro pagador o medio de pago.",
+      };
+
+      return "Pago Yape " + label + ": rechazado. " + (rejectedMessages[detail] || "Genera un codigo nuevo, verifica celular/saldo y evita usar la misma cuenta vendedora.") + detailSuffix;
+    }
+
+    return "Pago Yape " + label + ": " + status + detailSuffix + ".";
   }
 
   function updatePaymentPlanDraft(planId: PaidPlanId, cycle: BillingCycle, value: string) {
@@ -3906,10 +4692,30 @@ export default function App() {
     }
   }
 
+  function yapeAmountValidationMessage(planId: PaidPlanId) {
+    const amount = Number(paymentPlans[planId].prices[billingCycle]);
+
+    if (!Number.isFinite(amount) || amount < MIN_YAPE_PAYMENT_AMOUNT_PEN) {
+      return "Yape en produccion esta rechazando " + formatMoney(amount || 0) + ". Configura este plan con un monto minimo de " + formatMoney(MIN_YAPE_PAYMENT_AMOUNT_PEN) + " o usa tarjeta.";
+    }
+
+    return "";
+  }
+
   function startCheckout(planId: PaidPlanId, method: CheckoutMethod) {
     if (dbLoading.plans || !paymentPlansReady) {
       setConnectionLog("Espera a que Firestore cargue los precios reales antes de iniciar el pago.");
       return;
+    }
+
+    if (method === "yape") {
+      const amountMessage = yapeAmountValidationMessage(planId);
+
+      if (amountMessage) {
+        setConnectionLog(amountMessage);
+        showToast(amountMessage, "error");
+        return;
+      }
     }
 
     setCheckout({ method, planId });
@@ -3928,6 +4734,16 @@ export default function App() {
   function chooseCheckoutMethod(method: CheckoutMethod) {
     if (!checkout) {
       return;
+    }
+
+    if (method === "yape") {
+      const amountMessage = yapeAmountValidationMessage(checkout.planId);
+
+      if (amountMessage) {
+        setCheckoutStatus(amountMessage);
+        showToast(amountMessage, "error");
+        return;
+      }
     }
 
     setCheckout({ ...checkout, method });
@@ -3959,6 +4775,13 @@ export default function App() {
       return;
     }
 
+    const submitAmountMessage = yapeAmountValidationMessage(checkout.planId);
+
+    if (submitAmountMessage) {
+      setCheckoutStatus(submitAmountMessage);
+      return;
+    }
+
     if (!yapeDraft.phoneNumber.trim() || !yapeDraft.otp.trim()) {
       setCheckoutStatus("Ingresa celular y codigo Yape.");
       return;
@@ -3976,8 +4799,26 @@ export default function App() {
         yapeToken,
       });
       const label = paymentPlans[checkout.planId].label;
-      setCheckoutStatus(`Pago Yape ${label}: ${response.status ?? "pendiente"}.`);
-      setConnectionLog(`Mercado Pago registro el pago Yape ${response.id ?? label}.`);
+      const status = String(response.status || "pending").toLowerCase();
+      const statusMessage = describeYapePaymentStatus(response, label);
+      setCheckoutStatus(statusMessage);
+      setConnectionLog(
+        "Mercado Pago registro el pago Yape " +
+          (response.id ?? label) +
+          ": " +
+          (response.status ?? "sin_estado") +
+          (response.statusDetail ? " / " + response.statusDetail : "") +
+          ".",
+      );
+
+      if (status === "approved") {
+        await syncUserAccess(user);
+        showToast("Plan " + label + " activo en tu cuenta.", "success");
+      } else if (status === "rejected") {
+        showToast(statusMessage, "error");
+      } else {
+        showToast(statusMessage, "info");
+      }
     } catch (error) {
       // TypeError: Failed to fetch → Worker no disponible o bloqueado por extensión
       const raw = error instanceof Error ? error.message : "";
@@ -4020,7 +4861,8 @@ export default function App() {
 
     return (
       <span className={`${className} fallback-visual`} aria-hidden="true">
-        <span className="fallback-gradient-overlay" />
+        <span className="fallback-grid" />
+        <span className="fallback-object-shadow" />
         <span className="fallback-icon-wrapper">
           {getCategoryIcon(product.category, product.kind)}
         </span>
@@ -4169,7 +5011,7 @@ export default function App() {
               <span className="card-footer">
                 <i>
                   <Download aria-hidden="true" size={13} />
-                  <span>{product.downloads}</span>
+                  <span>{getDownloadLabel(product)}</span>
                 </i>
                 <b>
                   <Download aria-hidden="true" size={13} />
@@ -4338,7 +5180,7 @@ export default function App() {
       <div className="plans-page-hero">
         <span>Planes InfraBIM</span>
         <h1>Los mejores proyectos empiezan aqui</h1>
-        <p>Todo lo que necesitas, directamente en Revit, Firestore y Google Drive.</p>
+        <p>Todo lo que necesitas, directamente en Revit y en tu biblioteca InfraBIM.</p>
       </div>
     );
 
@@ -4408,8 +5250,8 @@ export default function App() {
               "Materiales con texturas listas para renderizar",
             ])}
 
-            <button className="plan-cta secondary" onClick={() => scrollTo("plugin")} type="button">
-              Descargar el plugin
+            <button className="plan-cta secondary" onClick={goToPluginPage} type="button">
+              Ver plugin
               <Download aria-hidden="true" size={16} />
             </button>
           </article>
@@ -4443,7 +5285,13 @@ export default function App() {
                 Suscribirme
                 <CreditCard aria-hidden="true" size={16} />
               </button>
-              <button className="plan-cta secondary" onClick={() => startCheckout("profesional", "yape")} type="button">
+              <button
+                className="plan-cta secondary"
+                disabled={professionalAmount < MIN_YAPE_PAYMENT_AMOUNT_PEN}
+                onClick={() => startCheckout("profesional", "yape")}
+                title={professionalAmount < MIN_YAPE_PAYMENT_AMOUNT_PEN ? "Yape requiere al menos " + formatMoney(MIN_YAPE_PAYMENT_AMOUNT_PEN) + "." : undefined}
+                type="button"
+              >
                 Pagar con Yape
                 <Smartphone aria-hidden="true" size={16} />
               </button>
@@ -4480,7 +5328,13 @@ export default function App() {
                 Suscribirme
                 <CreditCard aria-hidden="true" size={16} />
               </button>
-              <button className="plan-cta secondary" onClick={() => startCheckout("estudiante", "yape")} type="button">
+              <button
+                className="plan-cta secondary"
+                disabled={studentAmount < MIN_YAPE_PAYMENT_AMOUNT_PEN}
+                onClick={() => startCheckout("estudiante", "yape")}
+                title={studentAmount < MIN_YAPE_PAYMENT_AMOUNT_PEN ? "Yape requiere al menos " + formatMoney(MIN_YAPE_PAYMENT_AMOUNT_PEN) + "." : undefined}
+                type="button"
+              >
                 Pagar con Yape
                 <Smartphone aria-hidden="true" size={16} />
               </button>
@@ -4563,33 +5417,24 @@ export default function App() {
         <strong>{product.name}</strong>
         <small>{product.maker}</small>
 
-        <div style={{ display: "flex", gap: "0.3rem", flexWrap: "wrap", margin: "0.35rem 0 0.2rem 0" }}>
-          {product.formats.slice(0, 3).map((fmt) => (
-            <span
-              key={fmt}
-              style={{
-                fontSize: "0.7rem",
-                background: "var(--surface-2)",
-                padding: "0.15rem 0.45rem",
-                borderRadius: "4px",
-                fontWeight: 700,
-                color: "var(--muted)",
-              }}
-            >
+        <div className="format-chip-row" aria-label={"Formatos disponibles para " + product.name}>
+          {product.formats.slice(0, 4).map((fmt) => (
+            <span className="format-chip" key={fmt}>
               {fmt}
             </span>
           ))}
+          {product.formats.length > 4 && <span className="format-chip format-chip-more">+{product.formats.length - 4}</span>}
         </div>
 
         <span className="card-footer">
           <i>
             <Download aria-hidden="true" size={13} />
-            <span>{product.downloads}</span>
+            <span>{getDownloadLabel(product)}</span>
           </i>
           <b
             onClick={(e) => {
               e.stopPropagation();
-              handleDownloadOrInsert(product);
+              void handleDownloadOrInsert(product);
             }}
           >
             <Download aria-hidden="true" size={13} />
@@ -4701,6 +5546,17 @@ export default function App() {
     const meta = catalogMeta[kind];
     const PageIcon = meta.Icon;
     const isMakerResultsPage = Boolean(selectedMaker && kind === "marcas");
+    const scopedProducts = catalogItems.filter((product) => {
+      if (isMakerResultsPage) {
+        return product.maker.trim().toLowerCase() === selectedMaker.trim().toLowerCase();
+      }
+
+      return product.kind === kind;
+    });
+    const resourceMenuOptions = resourceFilterOptions.filter((option) =>
+      option === "Todos" || scopedProducts.some((product) => product.discipline === option || product.category === option),
+    );
+    const resourceLabel = filter === "Todos" ? "Recurso" : filter;
 
     return (
       <section className="families-page catalog-route-page" id={kind}>
@@ -4718,32 +5574,117 @@ export default function App() {
             </h2>
             <p>{selectedMaker ? `Productos publicados por ${selectedMaker}.` : meta.description}</p>
           </div>
-          <button onClick={toggleSortMode} type="button">
-            {sortMode === "recent" ? "Recientes" : "Populares"}
-            <ChevronDown aria-hidden="true" size={16} />
-          </button>
+          <div className="catalog-filter-dropdown list-sort-dropdown">
+            <button
+              className={openCatalogMenu === "sort" ? "is-open" : ""}
+              onClick={() => toggleCatalogMenu("sort")}
+              type="button"
+              aria-expanded={openCatalogMenu === "sort"}
+            >
+              {sortMode === "recent" ? "Recientes" : "Populares"}
+              <ChevronDown aria-hidden="true" size={16} />
+            </button>
+            {openCatalogMenu === "sort" && (
+              <div className="catalog-filter-menu sort-filter-menu" role="menu">
+                <button className={sortMode === "popular" ? "is-selected" : ""} onClick={() => chooseSortMode("popular")} type="button">
+                  <span>Populares</span>
+                  <small>Mas descargados primero</small>
+                </button>
+                <button className={sortMode === "recent" ? "is-selected" : ""} onClick={() => chooseSortMode("recent")} type="button">
+                  <span>Recientes</span>
+                  <small>Ultimos publicados primero</small>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="filter-row">
-          <span>Filtrar por</span>
-          <button onClick={() => setFilter("Todos")} type="button">
-            <Crown aria-hidden="true" size={16} />
-            Recurso
-            <ChevronDown aria-hidden="true" size={16} />
-          </button>
-          <button className={selectedMaker ? "is-active" : ""} onClick={() => navigateTo("/marcas")} type="button">
-            <Factory aria-hidden="true" size={16} />
-            {selectedMaker || "Fabricantes"}
-            <ChevronDown aria-hidden="true" size={16} />
-          </button>
-          <button onClick={toggleSortMode} type="button">
-            <SlidersHorizontal aria-hidden="true" size={16} />
-            Avanzado
-            <ChevronDown aria-hidden="true" size={16} />
-          </button>
-        </div>
+          <span className="filter-row-label">Filtrar por</span>
+          <div className="catalog-filter-dropdown">
+            <button
+              className={filter !== "Todos" ? "is-active" : ""}
+              onClick={() => toggleCatalogMenu("resource")}
+              type="button"
+              aria-expanded={openCatalogMenu === "resource"}
+            >
+              <Crown aria-hidden="true" size={16} />
+              {resourceLabel}
+              <ChevronDown aria-hidden="true" size={16} />
+            </button>
+            {openCatalogMenu === "resource" && (
+              <div className="catalog-filter-menu" role="menu">
+                {resourceMenuOptions.map((option) => {
+                  const count =
+                    option === "Todos"
+                      ? scopedProducts.length
+                      : scopedProducts.filter((product) => product.discipline === option || product.category === option).length;
 
-        {renderAdvancedFilters()}
+                  return (
+                    <button className={filter === option ? "is-selected" : ""} key={option} onClick={() => selectResourceFilter(option)} type="button">
+                      <span>{option}</span>
+                      <small>{count}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="catalog-filter-dropdown">
+            <button
+              className={selectedMaker ? "is-active" : ""}
+              onClick={() => toggleCatalogMenu("maker")}
+              type="button"
+              aria-expanded={openCatalogMenu === "maker"}
+            >
+              <Factory aria-hidden="true" size={16} />
+              {selectedMaker || "Fabricantes"}
+              <ChevronDown aria-hidden="true" size={16} />
+            </button>
+            {openCatalogMenu === "maker" && (
+              <div className="catalog-filter-menu maker-filter-menu" role="menu">
+                <button className={!selectedMaker ? "is-selected" : ""} onClick={clearManufacturerFilter} type="button">
+                  <span>Todos los fabricantes</span>
+                  <small>{manufacturerFacets.length}</small>
+                </button>
+                {manufacturerFacets.map((maker) => (
+                  <button
+                    className={selectedMaker === maker.name ? "is-selected" : ""}
+                    key={maker.name}
+                    onClick={() => selectManufacturerFilter(maker.name)}
+                    type="button"
+                  >
+                    <span>{maker.name}</span>
+                    <small>{maker.count}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="catalog-filter-dropdown advanced-filter-dropdown">
+            <button
+              className={
+                selectedFormat !== "Todos" || selectedVersion !== "Todas" || selectedPricing !== "Todos" || onlyFavorites
+                  ? "is-active"
+                  : ""
+              }
+              onClick={() => toggleCatalogMenu("advanced")}
+              type="button"
+              aria-expanded={openCatalogMenu === "advanced"}
+            >
+              <SlidersHorizontal aria-hidden="true" size={16} />
+              Avanzado
+              <ChevronDown aria-hidden="true" size={16} />
+            </button>
+            {openCatalogMenu === "advanced" && (
+              <div className="catalog-filter-menu advanced-filter-menu" role="menu">
+                {renderAdvancedFilters()}
+              </div>
+            )}
+          </div>
+        </div>
 
         {dbLoading.catalog ? (
           <div className="family-grid">{renderCatalogCardSkeletons(8)}</div>
@@ -4754,7 +5695,7 @@ export default function App() {
         ) : (
           renderDatabaseMessage(
             "Sin recursos publicados",
-            catalogError || "Firestore no devolvio recursos para esta busqueda o filtro seleccionado.",
+            catalogError || "No encontramos recursos para esta busqueda o filtro seleccionado.",
             () => void refreshCatalogItems(),
           )
         )}
@@ -4804,7 +5745,7 @@ export default function App() {
           <div className="empty-route">
             <PackagePlus aria-hidden="true" size={34} />
             <h2>Recurso no encontrado</h2>
-            <p>Puede estar pendiente de publicarse en Firestore o la ruta no existe.</p>
+            <p>Puede estar pendiente de publicarse o la ruta no existe.</p>
             <button onClick={goToAdmin} type="button">
               Crear recurso
             </button>
@@ -4875,7 +5816,7 @@ export default function App() {
                   {routeCatalogItem.isPremium ? "Premium" : "Gratis"}
                 </span>
               </div>
-              <button disabled={busy === "drive"} onClick={uploadSelectedToDrive} type="button">
+              <button disabled={busy === "download-zip"} onClick={() => void downloadAllSelectedFiles(routeCatalogItem)} type="button">
                 Descargar <Download aria-hidden="true" size={16} />
               </button>
             </div>
@@ -4899,41 +5840,39 @@ export default function App() {
 
             {routeCatalogItem.driveFolderLink && (
               <div style={{ marginTop: "1rem" }}>
-                <a
+                <button
                   className="plan-cta secondary"
-                  href={routeCatalogItem.driveFolderLink}
-                  rel="noopener noreferrer"
+                  onClick={() => void openProtectedDownload(routeCatalogItem, routeCatalogItem.driveFolderLink || "", "carpeta en Google Drive")}
                   style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", textDecoration: "none", width: "fit-content" }}
-                  target="_blank"
+                  type="button"
                 >
                   <Folder size={16} /> Abrir carpeta en Google Drive <ExternalLink size={14} />
-                </a>
+                </button>
               </div>
             )}
 
             {routeCatalogItem.attachedFiles && routeCatalogItem.attachedFiles.length > 0 && (
               <div style={{ marginTop: "1rem" }}>
-                <h3>Archivos adjuntos en Drive</h3>
+                <h3>Archivos adjuntos</h3>
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginTop: "0.5rem" }}>
                   {routeCatalogItem.attachedFiles.map((file) => (
-                    <a
+                    <button
                       key={file.id}
-                      href={file.webViewLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="attached-file-chip"
+                      className="attached-file-chip attached-file-button"
+                      onClick={() => void openProtectedDownload(routeCatalogItem, file.webViewLink || "", file.name)}
                       style={{ textDecoration: "none", color: "var(--ink)" }}
+                      type="button"
                     >
                       <FileText size={14} /> {file.name} <Download size={12} style={{ marginLeft: 4 }} />
-                    </a>
+                    </button>
                   ))}
                 </div>
               </div>
             )}
 
             <div className="detail-actions" style={{ marginTop: "1.5rem" }}>
-              <button disabled={busy === "firestore"} onClick={publishSelected} type="button">
-                Publicar en Firestore
+              <button disabled={busy === "download-zip"} onClick={() => void downloadAllSelectedFiles(routeCatalogItem)} type="button">
+                Descargar todo
               </button>
               <button disabled={busy === "favorite"} onClick={saveSelectedFavorite} type="button">
                 Guardar favorito
@@ -4956,22 +5895,22 @@ export default function App() {
         Icon: User2,
         color: "#0f6872",
         description: "Explora el catalogo BIM, guarda favoritos y descarga recursos gratuitos.",
-        info: "Tu cuenta tiene acceso de lectura al catalogo. Activa un plan Pro para desbloquear descargas ilimitadas, Drive y el plugin Revit.",
+        info: "Tu cuenta tiene acceso de lectura al catalogo. Activa un plan Pro para desbloquear descargas ilimitadas y el plugin Revit.",
         actions: [
           { icon: <Box size={18} />, label: "Ver familias BIM", detail: "Explora el catalogo completo de objetos.", onClick: () => navigateTo("/familias") },
           { icon: <Star size={18} />, label: "Mis favoritos", detail: "Objetos que guardaste para proyectos.", onClick: () => saveSelectedFavorite() },
-          { icon: <CreditCard size={18} />, label: "Ver planes", detail: "Desbloquea descargas ilimitadas y Drive.", onClick: () => goToPlans() },
-          { icon: <Download size={18} />, label: "Descargar plugin", detail: "Plugin gratuito para Revit 2024-2026.", onClick: () => scrollTo("plugin") },
+          { icon: <CreditCard size={18} />, label: "Ver planes", detail: "Desbloquea descargas ilimitadas.", onClick: () => goToPlans() },
+          { icon: <Download size={18} />, label: "Descargar plugin", detail: "Plugin gratuito para Revit 2024-2026.", onClick: () => void downloadPluginInstaller() },
         ],
       },
       "Creador BIM": {
         Icon: Wrench,
         color: "#d96f3d",
         description: "Publica familias, materiales y colecciones en el catalogo de InfraBIM.",
-        info: "Como Creador BIM tienes acceso para publicar recursos en Firestore y subir fichas a Google Drive.",
+        info: "Como Creador BIM tienes acceso para publicar recursos y subir fichas tecnicas.",
         actions: [
           { icon: <PackagePlus size={18} />, label: "Crear recurso", detail: "Publica una familia, material o coleccion.", onClick: () => goToAdmin() },
-          { icon: <UploadCloud size={18} />, label: "Subir a Drive", detail: "Vincula una ficha tecnica a tu objeto BIM.", onClick: () => uploadSelectedToDrive() },
+          { icon: <UploadCloud size={18} />, label: "Subir archivos", detail: "Vincula una ficha tecnica a tu objeto BIM.", onClick: () => uploadSelectedToDrive() },
           { icon: <Box size={18} />, label: "Ver familias", detail: "Revisa el catalogo actual.", onClick: () => navigateTo("/familias") },
           { icon: <Images size={18} />, label: "Galeria", detail: "Publica renders y previsualizaciones.", onClick: () => navigateTo("/galeria") },
         ],
@@ -5699,6 +6638,111 @@ export default function App() {
     );
   }
 
+  function renderPluginLandingPage() {
+    const featureCards: Array<{ Icon: LucideIcon; title: string; text: string }> = [
+      {
+        Icon: Search,
+        title: "Busqueda BIM desde Revit",
+        text: "Encuentra familias por nombre, categoria, fabricante, formato o version sin salir del flujo de modelado.",
+      },
+      {
+        Icon: Download,
+        title: "Descargas protegidas",
+        text: "Toda descarga valida sesion InfraBIM y conserva el acceso seguro a archivos, ZIP y carpetas vinculadas.",
+      },
+      {
+        Icon: Box,
+        title: "Insertar familias",
+        text: "Carga familias compatibles y abre recursos del catalogo para acelerar documentacion y coordinacion.",
+      },
+      {
+        Icon: Heart,
+        title: "Favoritos y biblioteca",
+        text: "Guarda elementos frecuentes para reutilizarlos en proyectos, equipos y entregables recurrentes.",
+      },
+      {
+        Icon: Sparkles,
+        title: "Vista 3D y AR",
+        text: "Revisa modelos GLB, previews y metadatos tecnicos antes de llevarlos al proyecto.",
+      },
+      {
+        Icon: ShieldCheck,
+        title: "Roles y permisos",
+        text: "Funciona con el control de acceso de InfraBIM para equipos, fabricantes y administradores.",
+      },
+    ];
+
+    return (
+      <section className="plugin-exclusive-page">
+        <div className="plugin-exclusive-hero">
+          <div className="plugin-exclusive-copy">
+            <p>Plugin exclusivo InfraBIM</p>
+            <h1>Instala InfraBIM para Revit y trabaja el catalogo desde tu modelo.</h1>
+            <span>
+              Descarga el instalador ZIP, inicia sesion con tu cuenta InfraBIM y conecta Revit con familias, materiales,
+              colecciones y archivos tecnicos publicados en la plataforma.
+            </span>
+            <div className="plugin-exclusive-actions">
+              <button disabled={busy === "auth"} onClick={() => void downloadPluginInstaller()} type="button">
+                <Download aria-hidden="true" size={18} />
+                {user ? "Descargar ZIP del instalador" : "Iniciar sesion y descargar ZIP"}
+              </button>
+              <button onClick={() => navigateTo("/familias")} type="button">
+                <LayoutGrid aria-hidden="true" size={18} />
+                Ver catalogo compatible
+              </button>
+            </div>
+            <div className="plugin-exclusive-meta" aria-label="Compatibilidad del instalador">
+              <span>Revit 2024 - 2026</span>
+              <span>Instalacion por usuario</span>
+              <span>Archivo ZIP: {pluginInstallerZipName}</span>
+            </div>
+          </div>
+          <div className="plugin-exclusive-preview">
+            <div className="plugin-preview-stage">
+              <img src="/bim-hero.png" alt="Render del plugin InfraBIM operando dentro de Revit con catalogo BIM y modelo 3D" />
+              <div className="plugin-preview-panel">
+                <span>InfraBIM Plugin</span>
+                <strong>Buscar. Previsualizar. Cargar.</strong>
+                <small>Biblioteca BIM conectada a tu cuenta.</small>
+              </div>
+            </div>
+            <div className="plugin-preview-gallery" aria-label="Renders del flujo de trabajo del plugin InfraBIM">
+              <figure>
+                <img src="/plugin-interface-render.png" alt="Render de la interfaz de busqueda y categorias del plugin InfraBIM en Revit" />
+                <figcaption>Buscar familias desde Revit</figcaption>
+              </figure>
+              <figure>
+                <img src="/plugin-insert-render.png" alt="Render de una familia BIM insertada desde InfraBIM en un modelo de Revit" />
+                <figcaption>Previsualizar e insertar en el modelo</figcaption>
+              </figure>
+            </div>
+          </div>
+        </div>
+
+        <div className="plugin-feature-grid" aria-label="Funciones del plugin InfraBIM">
+          {featureCards.map(({ Icon, title, text }) => (
+            <article key={title}>
+              <span><Icon aria-hidden="true" size={20} /></span>
+              <strong>{title}</strong>
+              <small>{text}</small>
+            </article>
+          ))}
+        </div>
+
+        <div className="plugin-download-band">
+          <div>
+            <h2>Descarga segura del instalador</h2>
+            <p>El boton valida sesion antes de iniciar la descarga. Si no has ingresado, primero se abrira Google Auth.</p>
+          </div>
+          <button disabled={busy === "auth"} onClick={() => void downloadPluginInstaller()} type="button">
+            <Download aria-hidden="true" size={18} />
+            Descargar instalador ZIP
+          </button>
+        </div>
+      </section>
+    );
+  }
   function renderAdminPage() {
     if (!user) {
       return (
@@ -5770,6 +6814,7 @@ export default function App() {
     // ── Admin completo con tabs ──────────────────────────────────────
     const tabs: Array<{ key: typeof adminTab; label: string; Icon: LucideIcon }> = [
       { key: "resumen",  label: "Resumen",           Icon: LayoutDashboard },
+      { key: "usuarios", label: `Usuarios (${adminUsers.length})`, Icon: User2 },
       { key: "gestionar",label: `Gestionar (${remoteCatalogRaw.length})`, Icon: FolderKanban },
       { key: "crear",    label: catalogDraft.editingOriginalSlug ? "Editar recurso" : "Crear recurso", Icon: catalogDraft.editingOriginalSlug ? Edit3 : PackagePlus },
       { key: "precios",  label: "Precios",            Icon: CreditCard },
@@ -5832,6 +6877,11 @@ export default function App() {
                 <small>items en Firestore</small>
               </div>
               <div className="admin-stat-card">
+                <span>Usuarios</span>
+                <strong>{dbLoading.users ? renderSkeletonLine("skeleton-stat") : adminUsers.length}</strong>
+                <small>perfiles registrados</small>
+              </div>
+              <div className="admin-stat-card">
                 <span>Plan profesional</span>
                 <strong>
                   {dbLoading.plans ? renderSkeletonLine("skeleton-stat") : formatMoney(paymentPlans.profesional.prices.mensual)}
@@ -5854,6 +6904,163 @@ export default function App() {
           </div>
         )}
 
+        {/* Tab: Usuarios */}
+        {adminTab === "usuarios" && (
+          <div className="admin-tab-body create-panel admin-users-panel" id="usuarios">
+            <div className="section-title">
+              <div>
+                <h3>Usuarios y roles</h3>
+                <p>Revisa cuentas registradas, edita datos visibles, cambia roles o elimina perfiles de la app.</p>
+              </div>
+              <span><User2 aria-hidden="true" size={18} /> Cuentas</span>
+            </div>
+
+            <div className="admin-users-controls">
+              <label className="admin-users-search">
+                <Search aria-hidden="true" size={16} />
+                <input
+                  onChange={(event) => setAdminUserSearch(event.target.value)}
+                  placeholder="Buscar por nombre, correo, UID o rol..."
+                  value={adminUserSearch}
+                />
+              </label>
+              <label className="admin-users-filter">
+                <Filter aria-hidden="true" size={16} />
+                <select
+                  onChange={(event) => setAdminUserRoleFilter(event.target.value as "todos" | RoleKey)}
+                  value={adminUserRoleFilter}
+                >
+                  <option value="todos">Todos los roles</option>
+                  {adminRoleOptions.map((role) => (
+                    <option key={role} value={role}>{role}</option>
+                  ))}
+                </select>
+              </label>
+              <button disabled={dbLoading.users} onClick={refreshAdminUsers} type="button">
+                <Database aria-hidden="true" size={16} />
+                Recargar
+              </button>
+            </div>
+
+            {dbLoading.users ? (
+              <div className="admin-users-empty" aria-busy="true">Cargando usuarios...</div>
+            ) : filteredAdminUsers.length === 0 ? (
+              <div className="admin-users-empty">No se encontraron usuarios con los filtros seleccionados.</div>
+            ) : (
+              <div className="admin-users-list">
+                {filteredAdminUsers.map((profile) => {
+                  const isCurrentUser = profile.uid === user.uid;
+                  const userBusy = busy === `user-${profile.uid}`;
+                  const userLabel = getAdminUserLabel(profile);
+
+                  return (
+                    <article className={isCurrentUser ? "admin-user-card is-current-user" : "admin-user-card"} key={profile.uid}>
+                      <div className="admin-user-row">
+                        <div className="admin-user-main">
+                          <span className="admin-user-avatar" aria-hidden="true">
+                            {profile.photoURL ? (
+                              <img alt="" src={profile.photoURL} />
+                            ) : (
+                              userLabel.trim().charAt(0).toUpperCase() || "U"
+                            )}
+                          </span>
+                          <div>
+                            <strong>{userLabel}</strong>
+                            <small>{profile.email || "Sin correo"}</small>
+                            <code>{profile.uid}</code>
+                          </div>
+                        </div>
+
+                        <div className="admin-user-meta">
+                          {profile.role === "Administrador" && <Crown aria-hidden="true" size={15} />}
+                          <select
+                            aria-label={`Cambiar rol de ${userLabel}`}
+                            disabled={userBusy || isCurrentUser}
+                            onChange={(event) => void handleQuickUserRoleChange(profile, event.target.value as RoleKey)}
+                            value={profile.role}
+                          >
+                            {adminRoleOptions.map((role) => (
+                              <option key={role} value={role}>{role}</option>
+                            ))}
+                          </select>
+                          {profile.subscription?.status && (
+                            <span className="admin-user-subscription">{profile.subscription.status}</span>
+                          )}
+                          {isCurrentUser && <span className="admin-user-self">Tu cuenta</span>}
+                        </div>
+
+                        <div className="admin-user-actions">
+                          <button disabled={userBusy} onClick={() => beginEditAdminUser(profile)} type="button">
+                            <Edit3 aria-hidden="true" size={14} />
+                            Editar
+                          </button>
+                          <button
+                            className="is-danger"
+                            disabled={userBusy || isCurrentUser}
+                            onClick={() => void handleDeleteAdminUser(profile)}
+                            type="button"
+                          >
+                            <Trash2 aria-hidden="true" size={14} />
+                            Eliminar
+                          </button>
+                        </div>
+                      </div>
+
+                      {editingAdminUserUid === profile.uid && (
+                        <form className="admin-user-edit-form" onSubmit={persistAdminUserDraft}>
+                          <label>
+                            Nombre visible
+                            <input
+                              onChange={(event) => setAdminUserDraft((draft) => ({ ...draft, displayName: event.target.value }))}
+                              placeholder="Nombre del usuario"
+                              value={adminUserDraft.displayName}
+                            />
+                          </label>
+                          <label>
+                            Correo
+                            <input
+                              onChange={(event) => setAdminUserDraft((draft) => ({ ...draft, email: event.target.value }))}
+                              placeholder="correo@dominio.com"
+                              type="email"
+                              value={adminUserDraft.email}
+                            />
+                          </label>
+                          <label>
+                            URL de foto
+                            <input
+                              onChange={(event) => setAdminUserDraft((draft) => ({ ...draft, photoURL: event.target.value }))}
+                              placeholder="https://..."
+                              value={adminUserDraft.photoURL}
+                            />
+                          </label>
+                          <label>
+                            Rol
+                            <select
+                              disabled={isCurrentUser}
+                              onChange={(event) => setAdminUserDraft((draft) => ({ ...draft, role: event.target.value as RoleKey }))}
+                              value={adminUserDraft.role}
+                            >
+                              {adminRoleOptions.map((role) => (
+                                <option key={role} value={role}>{role}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <div className="admin-user-edit-actions">
+                            <button onClick={cancelEditAdminUser} type="button">Cancelar</button>
+                            <button disabled={userBusy} type="submit">
+                              <CheckSquare aria-hidden="true" size={15} />
+                              Guardar
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         {/* ── Tab: Gestionar Recursos ───────────────────────── */}
         {adminTab === "gestionar" && (
           <div className="admin-tab-body create-panel" id="gestionar">
@@ -6617,6 +7824,103 @@ export default function App() {
     );
   }
 
+  if (isPluginPage) {
+    return (
+      <main className="site-shell plugin-route">
+        <div className="top-strip">
+          <button onClick={() => void downloadPluginInstaller()} type="button">
+            {user ? "Descargar instalador InfraBIM para Revit ->" : "Inicia sesion para descargar el instalador ->"}
+          </button>
+          <button onClick={goToPlans} type="button">
+            {"Ver planes y acceso Pro ->"}
+          </button>
+        </div>
+
+        <header className="main-header">
+          <div className="header-row">
+            <button className="brand-logo" onClick={goHome} type="button">
+              <span className="brand-cube" aria-hidden="true">
+                <span className="brand-layer brand-layer-top" />
+                <span className="brand-layer brand-layer-glass" />
+                <span className="brand-layer brand-layer-shadow" />
+                <span className="brand-layer brand-layer-plan" />
+              </span>
+              <span className="brand-word">Infra<span>BIM</span></span>
+            </button>
+
+            <form
+              className="header-search"
+              onSubmit={(event) => {
+                event.preventDefault();
+                runSearch();
+              }}
+            >
+              {renderSearchKindControl()}
+              <input
+                aria-label="Buscar recursos BIM"
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Buscar familias BIM, fabricantes o formatos"
+                value={query}
+              />
+              <button className="icon-button" type="submit" aria-label="Buscar">
+                <Search aria-hidden="true" size={18} />
+              </button>
+            </form>
+            {renderDesktopActions()}
+          </div>
+
+          <nav className="secondary-nav" aria-label="Navegacion del catalogo">
+            {navigation.map((item) => (
+              <button key={item.path} onClick={() => handleNavigation(item.path)} type="button">
+                {item.label}
+              </button>
+            ))}
+            {renderMoreNavMenu()}
+            <button className="is-current" onClick={goToPluginPage} type="button">
+              Plugin para Revit
+            </button>
+          </nav>
+        </header>
+
+        {renderPluginLandingPage()}
+
+        <footer className="site-footer">
+          <div className="footer-grid">
+            {footerGroups.map(([title, ...links]) => (
+              <div key={title}>
+                <h3>{title}</h3>
+                {links.map((link) => (
+                  <button key={link} onClick={() => handleFooterAction(link)} type="button">
+                    {link}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+          <div className="footer-bottom">
+            <strong>InfraBIM</strong>
+            <span>InfraBIM Copyright 2026. Todos los derechos reservados.</span>
+            <button onClick={toggleLanguage} type="button">
+              {language === "ES" ? "Espanol" : "English"}
+            </button>
+          </div>
+        </footer>
+
+        {renderProfileEditorModal()}
+
+        {toasts.length > 0 && (
+          <div className="toast-container" aria-live="polite">
+            {toasts.map((toast) => (
+              <div key={toast.id} className={`toast-item toast-${toast.type || "info"}`}>
+                {toast.type === "success" ? <CheckCircle2 size={17} /> : <Info size={17} />}
+                <span>{toast.message}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+    );
+  }
   if (isAdminPage) {
     return (
       <main className="site-shell admin-route">
@@ -6631,9 +7935,14 @@ export default function App() {
 
         <header className="main-header">
           <div className="header-row">
-            <button className="brand-logo" onClick={() => scrollTo("inicio")} type="button">
-              <span className="brand-cube" aria-hidden="true" />
-              InfraBIM
+            <button className="brand-logo" onClick={goHome} type="button">
+              <span className="brand-cube" aria-hidden="true">
+                <span className="brand-layer brand-layer-top" />
+                <span className="brand-layer brand-layer-glass" />
+                <span className="brand-layer brand-layer-shadow" />
+                <span className="brand-layer brand-layer-plan" />
+              </span>
+              <span className="brand-word">Infra<span>BIM</span></span>
             </button>
 
             <form
@@ -6663,7 +7972,8 @@ export default function App() {
                 {item.label}
               </button>
             ))}
-            <button onClick={() => scrollTo("plugin")} type="button">
+            {renderMoreNavMenu()}
+            <button onClick={goToPluginPage} type="button">
               Plugin para Revit
             </button>
           </nav>
@@ -6702,7 +8012,7 @@ export default function App() {
             <button onClick={user ? goToAdmin : connectGoogleAccount} type="button">
               {user ? "Abrir panel" : "Conectar Google"}
             </button>
-            <button onClick={() => scrollTo("plugin")} type="button">
+            <button onClick={goToPluginPage} type="button">
               Ver plugin
             </button>
           </aside>
@@ -6729,9 +8039,14 @@ export default function App() {
 
         <header className="main-header">
           <div className="header-row">
-            <button className="brand-logo" onClick={() => scrollTo("inicio")} type="button">
-              <span className="brand-cube" aria-hidden="true" />
-              InfraBIM
+            <button className="brand-logo" onClick={goHome} type="button">
+              <span className="brand-cube" aria-hidden="true">
+                <span className="brand-layer brand-layer-top" />
+                <span className="brand-layer brand-layer-glass" />
+                <span className="brand-layer brand-layer-shadow" />
+                <span className="brand-layer brand-layer-plan" />
+              </span>
+              <span className="brand-word">Infra<span>BIM</span></span>
             </button>
 
             <form
@@ -6761,7 +8076,8 @@ export default function App() {
                 {item.label}
               </button>
             ))}
-            <button onClick={() => scrollTo("plugin")} type="button">
+            {renderMoreNavMenu()}
+            <button onClick={goToPluginPage} type="button">
               Plugin para Revit
             </button>
           </nav>
@@ -6800,7 +8116,7 @@ export default function App() {
             <button onClick={user ? goToAdmin : connectGoogleAccount} type="button">
               {user ? "Abrir panel" : "Conectar Google"}
             </button>
-            <button onClick={() => scrollTo("plugin")} type="button">
+            <button onClick={goToPluginPage} type="button">
               Ver plugin
             </button>
           </aside>
@@ -7008,7 +8324,7 @@ export default function App() {
                         className="plugin-insert-btn-compact"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleDownloadOrInsert(product);
+                          void handleDownloadOrInsert(product);
                         }}
                         type="button"
                         title="Cargar en Revit"
@@ -7048,7 +8364,7 @@ export default function App() {
                         className="plugin-insert-btn"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleDownloadOrInsert(product);
+                          void handleDownloadOrInsert(product);
                         }}
                         type="button"
                       >
@@ -7092,7 +8408,7 @@ export default function App() {
                       className="plugin-insert-btn"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleDownloadOrInsert(product);
+                        void handleDownloadOrInsert(product);
                       }}
                       type="button"
                     >
@@ -7203,18 +8519,18 @@ export default function App() {
                 {selectedPluginProduct.driveFolderLink && (
                   <button
                     className="plugin-modal-drive-btn"
-                    onClick={() => window.open(selectedPluginProduct.driveFolderLink, "_blank")}
+                    onClick={() => void openProtectedDownload(selectedPluginProduct, selectedPluginProduct.driveFolderLink || "", "carpeta de archivos")}
                     type="button"
                   >
                     <ExternalLink size={13} />
-                    <span>Drive</span>
+                    <span>Archivos</span>
                   </button>
                 )}
 
                 <button
                   className="plugin-modal-insert-btn"
                   onClick={() => {
-                    handleDownloadOrInsert(selectedPluginProduct);
+                    void handleDownloadOrInsert(selectedPluginProduct);
                     setSelectedPluginProduct(null);
                   }}
                   type="button"
@@ -7256,9 +8572,14 @@ export default function App() {
 
         <header className="main-header">
           <div className="header-row">
-            <button className="brand-logo" onClick={() => scrollTo("inicio")} type="button">
-              <span className="brand-cube" aria-hidden="true" />
-              InfraBIM
+            <button className="brand-logo" onClick={goHome} type="button">
+              <span className="brand-cube" aria-hidden="true">
+                <span className="brand-layer brand-layer-top" />
+                <span className="brand-layer brand-layer-glass" />
+                <span className="brand-layer brand-layer-shadow" />
+                <span className="brand-layer brand-layer-plan" />
+              </span>
+              <span className="brand-word">Infra<span>BIM</span></span>
             </button>
 
             <form
@@ -7293,7 +8614,8 @@ export default function App() {
                 {item.label}
               </button>
             ))}
-            <button onClick={() => scrollTo("plugin")} type="button">
+            {renderMoreNavMenu()}
+            <button onClick={goToPluginPage} type="button">
               Plugin para Revit
             </button>
           </nav>
@@ -7332,7 +8654,7 @@ export default function App() {
             <button onClick={user ? goToAdmin : connectGoogleAccount} type="button">
               {user ? "Abrir panel" : "Conectar Google"}
             </button>
-            <button onClick={() => scrollTo("plugin")} type="button">
+            <button onClick={goToPluginPage} type="button">
               Ver plugin
             </button>
           </aside>
@@ -7349,9 +8671,14 @@ export default function App() {
     <main className="site-shell">
       <header className="main-header">
         <div className="header-row home-header-row">
-          <button className="brand-logo" onClick={() => scrollTo("inicio")} type="button">
-            <span className="brand-cube" aria-hidden="true" />
-            InfraBIM
+          <button className="brand-logo" onClick={goHome} type="button">
+            <span className="brand-cube" aria-hidden="true">
+              <span className="brand-layer brand-layer-top" />
+              <span className="brand-layer brand-layer-glass" />
+              <span className="brand-layer brand-layer-shadow" />
+              <span className="brand-layer brand-layer-plan" />
+            </span>
+            <span className="brand-word">Infra<span>BIM</span></span>
           </button>
 
           <nav className="home-primary-nav" aria-label="Navegacion principal">
@@ -7360,10 +8687,8 @@ export default function App() {
                 {item.label}
               </button>
             ))}
-            <button onClick={() => navigateTo("/galeria")} type="button">
-              Mas...
-            </button>
-            <button className="plugin-link" onClick={() => scrollTo("plugin")} type="button">
+            {renderMoreNavMenu()}
+            <button className="plugin-link" onClick={goToPluginPage} type="button">
               Plugin para Revit
             </button>
           </nav>
@@ -7373,11 +8698,22 @@ export default function App() {
 
       <section className="hero-section" id="inicio">
         <div className="hero-copy">
-          <p>Biblioteca BIM para Latinoamerica</p>
-          <h1>Dale vida a tus proyectos con familias BIM listas para Revit.</h1>
-          <span>
-            Busca, guarda, publica y descarga objetos con metadatos tecnicos, visor 3D, Firestore y respaldo en Google Drive.
-          </span>
+          <div className="hero-slide" key={activeHeroSlide.title}>
+            <p>{activeHeroSlide.eyebrow}</p>
+            <h1>{activeHeroSlide.title}</h1>
+            <span>{activeHeroSlide.description}</span>
+          </div>
+          <div className="hero-slider-dots" aria-label="Mensajes destacados InfraBIM">
+            {heroSlides.map((slide, index) => (
+              <button
+                aria-label={"Ver mensaje: " + slide.eyebrow}
+                className={index === heroSlideIndex ? "is-active" : ""}
+                key={slide.eyebrow}
+                onClick={() => setHeroSlideIndex(index)}
+                type="button"
+              />
+            ))}
+          </div>
         </div>
 
         <form
@@ -7448,7 +8784,7 @@ export default function App() {
                 <span className="card-footer">
                   <i>
                     <Download aria-hidden="true" size={13} />
-                    <span>{product.downloads}</span>
+                    <span>{getDownloadLabel(product)}</span>
                   </i>
                   <b>
                     <Download aria-hidden="true" size={13} />
@@ -7461,7 +8797,7 @@ export default function App() {
         ) : (
           renderDatabaseMessage(
             "Catalogo sin publicaciones",
-            catalogError || "Cuando publiques recursos en Firestore apareceran aqui.",
+            catalogError || "Cuando publiques recursos apareceran aqui.",
             () => void refreshCatalogItems(),
           )
         )}
@@ -7534,25 +8870,35 @@ export default function App() {
         <div className="section-title">
           <div>
             <h2>Colecciones</h2>
-            <p>Paquetes completos para descargar objetos por ambiente o tipo de proyecto.</p>
+            <p>Paquetes completos publicados desde la base real de InfraBIM.</p>
           </div>
-          <button onClick={() => setCommonSearch("bano accesible")} type="button">
-            Abrir coleccion
+          <button onClick={() => navigateTo("/colecciones")} type="button">
+            Ver colecciones
           </button>
         </div>
-        <div className="collection-grid">
-          {[
-            ["Bano accesible", "8 objetos", "Sanitarios, barras, espejo, puerta e iluminacion."],
-            ["Habitacion hotel", "22 objetos", "Mobiliario, HVAC, tomas y luminarias."],
-            ["Cuarto de bombas", "31 objetos", "Bombas, valvulas, tuberias, tableros y sensores."],
-          ].map(([title, count, description]) => (
-            <button key={title} onClick={() => setCommonSearch(title)} type="button">
-              <span>{count}</span>
-              <strong>{title}</strong>
-              <small>{description}</small>
-            </button>
-          ))}
-        </div>
+        {dbLoading.catalog ? (
+          <div className="collection-grid">{renderCatalogCardSkeletons(3, "library")}</div>
+        ) : homeCollectionItems.length > 0 ? (
+          <div className="collection-grid">
+            {homeCollectionItems.map((collection) => {
+              const linkedCount = getLinkedAssetCount(collection);
+
+              return (
+                <button key={collection.id} onClick={() => navigateTo(collection.route)} type="button">
+                  <span>{linkedCount > 0 ? linkedCount + " objetos" : "Coleccion real"}</span>
+                  <strong>{collection.name}</strong>
+                  <small>{collection.description || [collection.maker, collection.category].filter(Boolean).join(" / ")}</small>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          renderDatabaseMessage(
+            "Sin colecciones reales publicadas",
+            "Cuando publiques paquetes con tipo Coleccion desde el panel, apareceran aqui.",
+            user ? goToAdmin : connectGoogleAccount,
+          )
+        )}
       </section>
 
       <section className="module-showcase" id="proyectos">
@@ -7570,12 +8916,12 @@ export default function App() {
         ) : homeProjectItems.length > 0 ? (
           <div className="project-grid">
             {homeProjectItems.map((project) => {
-              const linkedCount = (project.attachedFiles?.length || 0) + (project.images?.length || 0) + (project.glbUrl ? 1 : 0);
+              const linkedCount = getLinkedAssetCount(project);
               return (
                 <button key={project.id} onClick={() => navigateTo(project.route)} type="button">
                   <strong>{project.name}</strong>
                   <small>{[project.maker, project.category].filter(Boolean).join(" / ") || "Proyecto BIM"}</small>
-                  <span>{linkedCount > 0 ? linkedCount + " archivo(s) vinculados" : "Publicado en Firestore"}</span>
+                  <span>{linkedCount > 0 ? linkedCount + " archivo(s) vinculados" : "Publicado en InfraBIM"}</span>
                 </button>
               );
             })}
@@ -7594,18 +8940,23 @@ export default function App() {
           <p>Plugin para Revit</p>
           <h2>Inserta familias BIM con un clic desde tu flujo de trabajo.</h2>
           <span>
-            Busca objetos, revisa metadatos, guarda favoritos y sincroniza fichas con Google Drive.
+            Instalador con identidad InfraBIM, WebView2 integrado y acceso directo al catalogo desde Revit.
           </span>
+          <div className="plugin-installer-panel" aria-label="Instalador InfraBIM">
+            <span>Revit 2024 - 2026</span>
+            <span>Instalacion por usuario</span>
+            <span>WebView2 incluido</span>
+          </div>
           <div>
-            <button onClick={goToPlans} type="button">
-              Ver planes
+            <button onClick={goToPluginPage} type="button">
+              Ver funciones
             </button>
-            <button onClick={() => scrollTo("familias")} type="button">
-              Descargar gratis
+            <button onClick={() => void downloadPluginInstaller()} type="button">
+              Descargar ZIP
             </button>
           </div>
         </div>
-        <img src="/bim-hero.png" alt="Visual BIM de interiores y objetos listos para Revit" />
+        <img src="/bim-hero.png" alt="Render del plugin InfraBIM operando dentro de Revit con catalogo BIM y modelo 3D" />
       </section>
 
       <footer className="site-footer">
@@ -7645,7 +8996,7 @@ export default function App() {
           <button onClick={user ? goToAdmin : connectGoogleAccount} type="button">
             {user ? "Abrir panel" : "Conectar Google"}
           </button>
-          <button onClick={() => scrollTo("plugin")} type="button">
+          <button onClick={goToPluginPage} type="button">
             Ver plugin
           </button>
         </aside>

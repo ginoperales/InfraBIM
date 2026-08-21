@@ -81,42 +81,72 @@ namespace InfraBIMPlugin
 
         private static BitmapSource CreateRibbonIcon()
         {
-            int width = 32;
-            int height = 32;
+            const int width = 32;
+            const int height = 32;
             PixelFormat format = PixelFormats.Bgra32;
             int stride = width * 4;
             byte[] pixels = new byte[height * stride];
 
-            // Generar icono azul/morado de InfraBIM de 32x32 píxeles
+            static double Distance(int x, int y, double cx, double cy)
+            {
+                double dx = x - cx;
+                double dy = y - cy;
+                return Math.Sqrt(dx * dx + dy * dy);
+            }
+
+            static bool InsideCloud(int x, int y, double offset)
+            {
+                return
+                    Distance(x, y, 10, 18) <= 6 + offset ||
+                    Distance(x, y, 16, 14) <= 8 + offset ||
+                    Distance(x, y, 23, 18) <= 6 + offset ||
+                    (x >= 8 - offset && x <= 25 + offset && y >= 18 - offset && y <= 24 + offset);
+            }
+
+            static void SetPixel(byte[] target, int index, byte r, byte g, byte b, byte a)
+            {
+                target[index] = b;
+                target[index + 1] = g;
+                target[index + 2] = r;
+                target[index + 3] = a;
+            }
+
             for (int y = 0; y < height; y++)
             {
                 for (int x = 0; x < width; x++)
                 {
                     int index = (y * stride) + (x * 4);
-                    bool isBorder = x == 4 || x == 27 || y == 4 || y == 27;
-                    bool isInner = x >= 5 && x <= 26 && y >= 5 && y <= 26;
+                    bool outer = InsideCloud(x, y, 1.4);
+                    bool inner = InsideCloud(x, y, -0.3);
+                    bool highlight = inner && (y <= 15 || (x <= 13 && y <= 19));
+                    bool baseLine = inner && y >= 23 && x >= 9 && x <= 24;
 
-                    if (isInner)
+                    if (baseLine)
                     {
-                        pixels[index] = 241;     // B
-                        pixels[index + 1] = 102; // G
-                        pixels[index + 2] = 99;  // R (#6366f1)
-                        pixels[index + 3] = 255; // Alpha
+                        SetPixel(pixels, index, 7, 74, 82, 255);
                     }
-                    else if (isBorder)
+                    else if (highlight)
                     {
-                        pixels[index] = 220;     // B
-                        pixels[index + 1] = 70;  // G
-                        pixels[index + 2] = 60;  // R
-                        pixels[index + 3] = 255; // Alpha
+                        SetPixel(pixels, index, 76, 204, 204, 255);
+                    }
+                    else if (inner)
+                    {
+                        SetPixel(pixels, index, 14, 107, 111, 255);
+                    }
+                    else if (outer)
+                    {
+                        SetPixel(pixels, index, 8, 36, 42, 255);
                     }
                     else
                     {
-                        pixels[index + 3] = 0;   // Transparente
+                        pixels[index + 3] = 0;
                     }
                 }
             }
-            return BitmapSource.Create(width, height, 96, 96, format, null, pixels, stride);
+
+            BitmapSource icon = BitmapSource.Create(width, height, 96, 96, format, null, pixels, stride);
+            icon.Freeze();
+            return icon;
         }
 
         public Result OnShutdown(UIControlledApplication application)

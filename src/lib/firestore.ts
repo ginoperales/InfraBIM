@@ -119,6 +119,29 @@ export type PaymentPlanConfig = {
   prices: Record<PaymentBillingCycle, number>;
 };
 
+export type UserSubscription = {
+  billingCycle?: PaymentBillingCycle;
+  expiresAt?: unknown;
+  lastPaymentId?: string;
+  mercadoPagoId?: string;
+  mercadoPagoStatus?: string;
+  method?: string;
+  planId?: PaymentPlanId;
+  status?: string;
+  updatedAt?: unknown;
+};
+
+export type UserProfile = {
+  uid: string;
+  displayName?: string | null;
+  email?: string | null;
+  photoURL?: string | null;
+  role: RoleKey;
+  subscription?: UserSubscription | null;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+};
+
 export type PaymentPlansConfig = Record<PaymentPlanId, PaymentPlanConfig>;
 
 export const defaultPaymentPlansConfig: PaymentPlansConfig = {
@@ -300,6 +323,47 @@ export async function upsertUserProfile(user: User, role: RoleKey = "Usuario") {
   );
 }
 
+export async function fetchUsers(maxResults = 250): Promise<UserProfile[]> {
+  const firestore = requireDb();
+  const snapshot = await getDocs(query(collection(firestore, "users"), limit(maxResults)));
+
+  return snapshot.docs
+    .map((userDoc) => {
+      const data = userDoc.data() as Partial<UserProfile>;
+      return {
+        ...data,
+        uid: data.uid || userDoc.id,
+        role: data.role || "Usuario",
+      };
+    })
+    .sort((first, second) => {
+      const firstLabel = (first.displayName || first.email || first.uid).toLowerCase();
+      const secondLabel = (second.displayName || second.email || second.uid).toLowerCase();
+      return firstLabel.localeCompare(secondLabel, "es", { sensitivity: "base" });
+    });
+}
+
+export async function saveUserProfile(profile: UserProfile) {
+  const firestore = requireDb();
+  await setDoc(
+    doc(firestore, "users", profile.uid),
+    {
+      uid: profile.uid,
+      displayName: profile.displayName || null,
+      email: profile.email || null,
+      photoURL: profile.photoURL || null,
+      role: profile.role || "Usuario",
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+export async function deleteUserProfile(uid: string) {
+  const firestore = requireDb();
+  await deleteDoc(doc(firestore, "users", uid));
+}
+
 export async function initializeUserAccess(user: User) {
   const firestore = requireDb();
   const accessRef = doc(firestore, "system", "accessControl");
@@ -310,7 +374,9 @@ export async function initializeUserAccess(user: User) {
     const userSnapshot = await transaction.get(userRef);
     const fallbackAccess = defaultAccessControl(user);
     const access = accessSnapshot.exists() ? (accessSnapshot.data() as AccessControl) : fallbackAccess;
-    const existingRole = userSnapshot.data()?.role as RoleKey | undefined;
+    const userData = userSnapshot.data();
+    const existingRole = userData?.role as RoleKey | undefined;
+    const subscription = userData?.subscription as UserSubscription | undefined;
     const role: RoleKey = !accessSnapshot.exists()
       ? "Administrador"
       : access.ownerUid === user.uid
@@ -341,6 +407,7 @@ export async function initializeUserAccess(user: User) {
     return {
       access,
       role,
+      subscription: subscription ?? null,
       isAdmin: role === "Administrador",
     };
   });
@@ -415,6 +482,56 @@ export async function fetchCatalogItems(maxResults = 80): Promise<CatalogItemPay
   );
 
   return snapshot.docs.map((item) => item.data() as CatalogItemPayload);
+}
+
+function parseDownloadCount(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.round(value));
+  }
+
+  if (typeof value !== "string") {
+    return 0;
+  }
+
+  const normalized = value.trim().replace(",", ".").toUpperCase();
+  const parsed = Number.parseFloat(normalized);
+
+  if (Number.isNaN(parsed)) {
+    return 0;
+  }
+
+  if (normalized.includes("M")) {
+    return Math.round(parsed * 1000000);
+  }
+
+  if (normalized.includes("K")) {
+    return Math.round(parsed * 1000);
+  }
+
+  return Math.max(0, Math.round(parsed));
+}
+
+export async function incrementCatalogDownload(kind: CatalogKind, slug: string, currentDownloads = "0") {
+  const firestore = requireDb();
+  const ref = doc(firestore, "catalogItems", `${kind}_${slug}`);
+  let nextDownloads = String(parseDownloadCount(currentDownloads) + 1);
+
+  await runTransaction(firestore, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const existingDownloads = snapshot.exists() ? (snapshot.data() as CatalogItemPayload).downloads : currentDownloads;
+    const legacyBulkSeed = currentDownloads === "0" && existingDownloads === "1.2K";
+    nextDownloads = String((legacyBulkSeed ? 0 : parseDownloadCount(existingDownloads)) + 1);
+    transaction.set(
+      ref,
+      {
+        downloads: nextDownloads,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  });
+
+  return nextDownloads;
 }
 
 export async function deleteCatalogItem(kind: CatalogKind, slug: string) {

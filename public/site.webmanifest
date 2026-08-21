@@ -1,0 +1,16 @@
+{
+  "name": "InfraBIM",
+  "short_name": "InfraBIM",
+  "description": "Biblioteca BIM para Latinoamerica",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0e1418",
+  "theme_color": "#0e1418",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "64x64",
+      "type": "image/svg+xml"
+    }
+  ]
+}

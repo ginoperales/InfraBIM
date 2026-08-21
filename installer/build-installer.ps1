@@ -3,6 +3,7 @@
 # =====================================================================
 
 Write-Host "Iniciando compilacion de InfraBIM Revit Plugin..." -ForegroundColor Cyan
+$ErrorActionPreference = "Stop"
 
 $projectDir = Join-Path $PSScriptRoot "..\revit-plugin"
 $installerDir = $PSScriptRoot
@@ -27,14 +28,8 @@ if (-not (Test-Path $distDir)) {
 
 $zipPath = Join-Path $distDir "InfraBIM_Revit_Plugin_v1.0.0.zip"
 if (Test-Path $zipPath) {
-    Remove-Item $zipPath -Force
+    Remove-Item $zipPath -Force -ErrorAction Stop
 }
-
-$stagingDir = Join-Path $installerDir "Staging"
-if (Test-Path $stagingDir) {
-    Remove-Item $stagingDir -Recurse -Force
-}
-New-Item -ItemType Directory -Path $stagingDir | Out-Null
 
 $requiredFiles = @(
     "$projectDir\bin\Release\net8.0-windows\InfraBIMPlugin.dll",
@@ -44,14 +39,25 @@ $requiredFiles = @(
     "$projectDir\README.md"
 )
 
-foreach ($file in $requiredFiles) {
-    if (Test-Path $file) {
-        Copy-Item $file -Destination $stagingDir -Force
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.ZipArchiveMode]::Create)
+try {
+    foreach ($file in $requiredFiles) {
+        if (Test-Path $file) {
+            $entryName = Split-Path $file -Leaf
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip,
+                $file,
+                $entryName,
+                [System.IO.Compression.CompressionLevel]::Optimal
+            ) | Out-Null
+        }
     }
 }
-
-Compress-Archive -Path "$stagingDir\*" -DestinationPath $zipPath -Force
-Remove-Item $stagingDir -Recurse -Force
+finally {
+    $zip.Dispose()
+}
 
 Write-Host "Paquete ZIP creado exitosamente en installer/Output/InfraBIM_Revit_Plugin_v1.0.0.zip" -ForegroundColor Green
 
@@ -75,7 +81,19 @@ if (-not $isccPath) {
 if ($isccPath) {
     Write-Host "Generando ejecutable de instalacion InfraBIM_Plugin_Setup.exe con Inno Setup ($isccPath)..." -ForegroundColor Cyan
     & $isccPath "$installerDir\InfraBIMInstaller.iss"
-    Write-Host "¡Instalador .exe creado exitosamente en installer/Output/!" -ForegroundColor Green
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Error generando el instalador .exe con Inno Setup" -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+    Write-Host "Instalador .exe creado exitosamente en installer/Output/" -ForegroundColor Green
+
+    $installerExePath = Join-Path $distDir "InfraBIM_Plugin_Setup_v1.0.0.exe"
+    $installerZipPath = Join-Path $distDir "InfraBIM_Plugin_Installer_v1.0.0.zip"
+
+    if (Test-Path $installerExePath) {
+        Compress-Archive -LiteralPath $installerExePath -DestinationPath $installerZipPath -Force
+        Write-Host "Instalador empaquetado creado en installer/Output/InfraBIM_Plugin_Installer_v1.0.0.zip" -ForegroundColor Green
+    }
 } else {
     Write-Host "Inno Setup Compiler no se encuentra en las rutas por defecto de Program Files." -ForegroundColor Yellow
 }

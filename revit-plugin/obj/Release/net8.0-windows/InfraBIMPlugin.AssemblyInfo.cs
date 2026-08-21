@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("InfraBIMPlugin")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+cd84e81d70042d7d4ef094a770ad289812910a0c")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+86c22783ae9423b79223a9c90aeed6db25fc0936")]
 [assembly: System.Reflection.AssemblyProductAttribute("InfraBIMPlugin")]
 [assembly: System.Reflection.AssemblyTitleAttribute("InfraBIMPlugin")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -17,6 +17,8 @@ const DEFAULT_PAYMENT_PLANS = {
   },
 };
 
+const MIN_YAPE_PAYMENT_AMOUNT_PEN = 5;
+
 let cachedGoogleToken = null;
 let cachedJwks = null;
 
@@ -38,24 +40,28 @@ export default {
     }
 
     // Health check — useful to diagnose connectivity from localhost
-    if (request.method === "GET" && url.pathname === "/") {
+    if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) {
       return json(
         {
           ok: true,
           service: "InfraBIM payments worker",
-          configOk: Boolean(env.MERCADO_PAGO_ACCESS_TOKEN && env.FIREBASE_SERVICE_ACCOUNT),
+          configOk: Boolean(env.MERCADO_PAGO_ACCESS_TOKEN && env.FIREBASE_SERVICE_ACCOUNT && env.FIREBASE_PROJECT_ID),
         },
         headers,
       );
     }
 
+    if (request.method === "GET" && url.pathname === "/mercado-pago-health") {
+      return await mercadoPagoCredentialsHealth(env, headers);
+    }
+
     // Guard: if secrets are missing return 503 (not 500) so the frontend
     // can show a clearer message instead of a generic CORS/network error.
-    if (!env.MERCADO_PAGO_ACCESS_TOKEN || !env.FIREBASE_SERVICE_ACCOUNT) {
+    if (!env.MERCADO_PAGO_ACCESS_TOKEN || !env.FIREBASE_SERVICE_ACCOUNT || !env.FIREBASE_PROJECT_ID) {
       return json(
         {
           message:
-            "El Worker de pagos no está configurado. Agrega MERCADO_PAGO_ACCESS_TOKEN y FIREBASE_SERVICE_ACCOUNT en Cloudflare.",
+            "El Worker de pagos no está configurado. Agrega MERCADO_PAGO_ACCESS_TOKEN, FIREBASE_SERVICE_ACCOUNT y FIREBASE_PROJECT_ID en Cloudflare.",
           code: "WORKER_NOT_CONFIGURED",
         },
         headers,
@@ -105,7 +111,8 @@ async function createCardSubscription(request, env, headers) {
     return json({ message: "Token de tarjeta requerido." }, headers, 400);
   }
 
-  const externalReference = `${user.uid}:${planId}:${billingCycle}:${Date.now()}`;
+  const externalReference = buildExternalReference(user.uid, planId, billingCycle);
+  const idempotencyKey = crypto.randomUUID();
   const response = await mercadoPagoRequest(
     "/preapproval",
     {
@@ -118,11 +125,13 @@ async function createCardSubscription(request, env, headers) {
       back_url: env.APP_BASE_URL || "https://infrabimss.web.app/planes",
       card_token_id: cardTokenId,
       external_reference: externalReference,
+      notification_url: mercadoPagoWebhookUrl(request),
       payer_email: email,
       reason: `InfraBIM ${plan.label}`,
       status: "authorized",
     },
     env,
+    { idempotencyKey },
   );
 
   await savePaymentRecord(env, "subscriptions", response.id, {
@@ -130,6 +139,7 @@ async function createCardSubscription(request, env, headers) {
     billingCycle,
     createdAt: new Date(),
     externalReference,
+    idempotencyKey,
     mercadoPagoId: response.id,
     ownerEmail: email,
     ownerUid: user.uid,
@@ -142,9 +152,10 @@ async function createCardSubscription(request, env, headers) {
     billingCycle,
     expiresAt: null,
     mercadoPagoId: response.id,
+    mercadoPagoStatus: response.status || "pending",
     method: "card",
     planId,
-    status: response.status || "pending",
+    status: normalizeSubscriptionStatus(response.status),
     updatedAt: new Date(),
   });
 
@@ -169,19 +180,26 @@ async function createYapePayment(request, env, headers) {
     return json({ message: "Token de Yape requerido." }, headers, 400);
   }
 
+  validateYapeAmount(amount);
+
+  const externalReference = buildExternalReference(user.uid, planId, billingCycle);
+  const idempotencyKey = crypto.randomUUID();
   const response = await mercadoPagoRequest(
     "/v1/payments",
     {
       description: `InfraBIM ${plan.label} ${billingCycle}`,
+      external_reference: externalReference,
       installments: 1,
+      notification_url: mercadoPagoWebhookUrl(request),
       payer: {
         email,
       },
       payment_method_id: "yape",
       token: yapeToken,
-      transaction_amount: amount,
+      transaction_amount: normalizeMercadoPagoAmount(amount),
     },
     env,
+    { idempotencyKey },
   );
   const approved = response.status === "approved";
 
@@ -189,6 +207,8 @@ async function createYapePayment(request, env, headers) {
     amount,
     billingCycle,
     createdAt: new Date(),
+    externalReference,
+    idempotencyKey,
     mercadoPagoId: response.id,
     ownerEmail: email,
     ownerUid: user.uid,
@@ -204,9 +224,10 @@ async function createYapePayment(request, env, headers) {
       billingCycle,
       expiresAt: planEndDate(billingCycle),
       mercadoPagoId: response.id,
+      mercadoPagoStatus: response.status,
       method: "yape",
       planId,
-      status: response.status,
+      status: "active",
       updatedAt: new Date(),
     });
   }
@@ -268,24 +289,94 @@ async function mercadoPagoWebhook(request, env, headers) {
 }
 
 async function refreshMercadoPagoResource(env, type, resourceId) {
-  if (type.includes("payment")) {
-    const payment = await mercadoPagoGet(`/v1/payments/${resourceId}`, env);
-    await savePaymentRecord(env, "payments", payment.id, {
-      mercadoPagoId: payment.id,
-      status: payment.status || "pending",
-      statusDetail: payment.status_detail || "",
+  const normalizedType = String(type || "").toLowerCase();
+
+  if (normalizedType.includes("authorized_payment")) {
+    const authorizedPayment = await mercadoPagoGet(`/authorized_payments/${resourceId}`, env);
+    await savePaymentRecord(env, "subscriptionAuthorizedPayments", authorizedPayment.id, {
+      mercadoPagoId: authorizedPayment.id,
+      preapprovalId: authorizedPayment.preapproval_id || "",
+      status: authorizedPayment.status || "pending",
+      statusDetail: authorizedPayment.status_detail || "",
       updatedAt: new Date(),
     });
     return;
   }
 
-  if (type.includes("preapproval") || type.includes("subscription")) {
+  if (normalizedType.includes("payment")) {
+    const payment = await mercadoPagoGet(`/v1/payments/${resourceId}`, env);
+    const reference = parseExternalReference(payment.external_reference);
+    const patch = {
+      amount: Number(payment.transaction_amount || 0),
+      externalReference: payment.external_reference || "",
+      mercadoPagoId: payment.id,
+      status: payment.status || "pending",
+      statusDetail: payment.status_detail || "",
+      updatedAt: new Date(),
+    };
+
+    if (reference) {
+      Object.assign(patch, {
+        billingCycle: reference.billingCycle,
+        ownerUid: reference.uid,
+        paymentMethodId: payment.payment_method_id || payment.payment_type_id || "payment",
+        planId: reference.planId,
+      });
+    }
+
+    await savePaymentRecord(env, "payments", payment.id, patch);
+
+    if (reference && payment.status === "approved") {
+      await updateUserPlan(env, reference.uid, {
+        billingCycle: reference.billingCycle,
+        expiresAt: planEndDate(reference.billingCycle),
+        lastPaymentId: payment.id,
+        mercadoPagoId: payment.id,
+        mercadoPagoStatus: payment.status,
+        method: payment.payment_method_id || "payment",
+        planId: reference.planId,
+        status: "active",
+        updatedAt: new Date(),
+      });
+    }
+    return;
+  }
+
+  if (normalizedType.includes("preapproval") || normalizedType.includes("subscription")) {
     const subscription = await mercadoPagoGet(`/preapproval/${resourceId}`, env);
-    await savePaymentRecord(env, "subscriptions", subscription.id, {
+    const reference = parseExternalReference(subscription.external_reference);
+    const patch = {
+      amount: Number(subscription.auto_recurring?.transaction_amount || 0),
+      externalReference: subscription.external_reference || "",
       mercadoPagoId: subscription.id,
       status: subscription.status || "pending",
       updatedAt: new Date(),
-    });
+    };
+
+    if (reference) {
+      Object.assign(patch, {
+        billingCycle: reference.billingCycle,
+        ownerEmail: subscription.payer_email || "",
+        ownerUid: reference.uid,
+        paymentMethodId: subscription.payment_method_id || "card",
+        planId: reference.planId,
+      });
+    }
+
+    await savePaymentRecord(env, "subscriptions", subscription.id, patch);
+
+    if (reference) {
+      await updateUserPlan(env, reference.uid, {
+        billingCycle: reference.billingCycle,
+        expiresAt: String(subscription.status || "").toLowerCase() === "authorized" ? null : new Date(),
+        mercadoPagoId: subscription.id,
+        mercadoPagoStatus: subscription.status || "pending",
+        method: "card",
+        planId: reference.planId,
+        status: normalizeSubscriptionStatus(subscription.status),
+        updatedAt: new Date(),
+      });
+    }
   }
 }
 
@@ -392,7 +483,7 @@ async function getPlan(env, planId, billingCycle) {
     throw new Error("Plan o frecuencia no valida.");
   }
 
-  return { amount, plan };
+  return { amount: normalizeMercadoPagoAmount(amount), plan };
 }
 
 async function getPaymentPlans(env) {
@@ -428,6 +519,21 @@ function normalizePaymentPlans(data = {}) {
   );
 }
 
+function normalizeMercadoPagoAmount(amount) {
+  return Number(Number(amount).toFixed(2));
+}
+
+function validateYapeAmount(amount) {
+  if (!Number.isFinite(amount) || amount < MIN_YAPE_PAYMENT_AMOUNT_PEN) {
+    const err = new Error(
+      "Yape en produccion esta rechazando este monto. Configura el plan con minimo S/ " + MIN_YAPE_PAYMENT_AMOUNT_PEN + ".",
+    );
+    err.status = 400;
+    err.code = "YAPE_AMOUNT_TOO_LOW";
+    throw err;
+  }
+}
+
 function cleanEmail(email, fallback) {
   const value = String(email || fallback || "").trim().toLowerCase();
 
@@ -438,30 +544,125 @@ function cleanEmail(email, fallback) {
   return value;
 }
 
-async function mercadoPagoRequest(path, body, env) {
+async function mercadoPagoRequest(path, body, env, options = {}) {
   const response = await fetch(`https://api.mercadopago.com${path}`, {
     body: JSON.stringify(body),
     headers: {
       Authorization: `Bearer ${env.MERCADO_PAGO_ACCESS_TOKEN}`,
       "Content-Type": "application/json",
-      "x-idempotency-key": crypto.randomUUID(),
+      "X-Idempotency-Key": options.idempotencyKey || crypto.randomUUID(),
     },
     method: "POST",
   });
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    const cause = Array.isArray(payload.cause) ? payload.cause[0] : null;
     const detail =
-      payload.cause?.[0]?.description ||
       payload.message ||
+      cause?.description ||
       payload.error ||
       "Mercado Pago rechazo la operacion.";
-    const err = new Error(`Mercado Pago: ${detail}`);
+    const code = String(cause?.code || payload.code || "");
+    const message =
+      code === "2072" || code === "4037" || String(detail).toLowerCase().includes("transaction_amount")
+        ? "Mercado Pago rechazo el monto enviado para Yape. Revisa que el plan tenga un importe real compatible."
+        : "Mercado Pago: " + detail;
+    const err = new Error(message);
     err.status = response.status >= 400 && response.status < 600 ? response.status : 400;
+    err.code = code || payload.error || "MERCADO_PAGO_ERROR";
     throw err;
   }
 
   return payload;
+}
+
+function buildExternalReference(uid, planId, billingCycle) {
+  return `${uid}:${planId}:${billingCycle}:${Date.now().toString(36)}`;
+}
+
+function parseExternalReference(value) {
+  const [uid, planId, billingCycle] = String(value || "").split(":");
+
+  if (!uid || !["profesional", "estudiante"].includes(planId) || !["mensual", "anual"].includes(billingCycle)) {
+    return null;
+  }
+
+  return { billingCycle, planId, uid };
+}
+
+function mercadoPagoWebhookUrl(request) {
+  const url = new URL(request.url);
+  url.pathname = "/mercado-pago-webhook";
+  url.search = "";
+  return url.toString();
+}
+
+function normalizeSubscriptionStatus(status) {
+  const normalized = String(status || "pending").toLowerCase();
+
+  if (normalized === "authorized" || normalized === "approved") {
+    return "active";
+  }
+
+  return normalized;
+}
+
+async function mercadoPagoCredentialsHealth(env, headers) {
+  if (!env.MERCADO_PAGO_ACCESS_TOKEN) {
+    return json(
+      {
+        ok: false,
+        mercadoPagoOk: false,
+        message: "Falta MERCADO_PAGO_ACCESS_TOKEN en Cloudflare Workers.",
+      },
+      headers,
+      503,
+    );
+  }
+
+  const response = await fetch("https://api.mercadolibre.com/users/me", {
+    headers: {
+      Authorization: `Bearer ${env.MERCADO_PAGO_ACCESS_TOKEN}`,
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    return json(
+      {
+        ok: false,
+        mercadoPagoOk: false,
+        status: response.status,
+        error: payload.error || payload.message || "invalid_credentials",
+      },
+      headers,
+      200,
+    );
+  }
+
+  const methodsResponse = await fetch("https://api.mercadopago.com/v1/payment_methods", {
+    headers: {
+      Authorization: `Bearer ${env.MERCADO_PAGO_ACCESS_TOKEN}`,
+    },
+  });
+  const methodsPayload = await methodsResponse.json().catch(() => []);
+  const paymentMethods = Array.isArray(methodsPayload) ? methodsPayload : [];
+  const yapeMethod = paymentMethods.find((method) => method?.id === "yape");
+
+  return json(
+    {
+      ok: true,
+      mercadoPagoOk: true,
+      countryId: payload.country_id || "",
+      siteId: payload.site_id || "",
+      userStatus: payload.status?.site_status || payload.status || "active",
+      yapeAvailable: Boolean(yapeMethod),
+      yapeStatus: yapeMethod?.status || "",
+      paymentMethodsOk: methodsResponse.ok,
+    },
+    headers,
+  );
 }
 
 async function mercadoPagoGet(path, env) {

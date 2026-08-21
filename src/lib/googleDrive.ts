@@ -11,6 +11,10 @@ export type DriveFile = {
   webViewLink?: string;
 };
 
+export type DriveTreeFile = DriveFile & {
+  path: string;
+};
+
 export type DriveUploadProgress = {
   loaded: number;
   total: number;
@@ -54,6 +58,10 @@ async function safeFetch(url: string | URL, init?: RequestInit): Promise<Respons
     }
     throw err;
   }
+}
+
+function escapeDriveQueryValue(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
 function parseDriveErrorMessage(status: number, rawText: string): string {
@@ -193,6 +201,37 @@ export async function listDriveFiles(accessToken: string, folderId?: string): Pr
   return data.files;
 }
 
+export async function findDriveFolderClient(
+  accessToken: string,
+  name: string,
+  parentFolderId?: string
+): Promise<{ id: string; name: string; webViewLink?: string } | null> {
+  const url = new URL(DRIVE_API);
+  url.searchParams.set("pageSize", "1");
+  url.searchParams.set("supportsAllDrives", "true");
+  url.searchParams.set("includeItemsFromAllDrives", "true");
+  url.searchParams.set("fields", "files(id,name,webViewLink)");
+  const queryParts = [
+    "mimeType='application/vnd.google-apps.folder'",
+    "trashed=false",
+    "name='" + escapeDriveQueryValue(name) + "'",
+  ];
+  if (parentFolderId) {
+    queryParts.push("'" + parentFolderId + "' in parents");
+  }
+  url.searchParams.set("q", queryParts.join(" and "));
+
+  const data = await parseDriveResponse<{ files: Array<{ id: string; name: string; webViewLink?: string }> }>(
+    await safeFetch(url, {
+      headers: {
+        Authorization: "Bearer " + accessToken,
+      },
+    }),
+  );
+
+  return data.files[0] || null;
+}
+
 export async function createDriveFolderClient(
   accessToken: string,
   name: string,
@@ -225,6 +264,20 @@ export async function createDriveFolderClient(
   const data = await parseDriveResponse<{ id: string; name: string; webViewLink?: string }>(response);
   await setDrivePublicPermissionClient(accessToken, data.id);
   return data;
+}
+
+export async function getOrCreateDriveFolderClient(
+  accessToken: string,
+  name: string,
+  parentFolderId?: string
+): Promise<{ id: string; name: string; webViewLink?: string; reused: boolean }> {
+  const existing = await findDriveFolderClient(accessToken, name, parentFolderId);
+  if (existing) {
+    return { ...existing, reused: true };
+  }
+
+  const created = await createDriveFolderClient(accessToken, name, parentFolderId);
+  return { ...created, reused: false };
 }
 
 export async function setDrivePublicPermissionClient(accessToken: string, fileId: string): Promise<void> {
@@ -307,6 +360,73 @@ export async function uploadJsonToDrive(
       body,
     }),
   );
+}
+
+async function listDriveChildren(accessToken: string, folderId: string): Promise<DriveFile[]> {
+  const allFiles: DriveFile[] = [];
+  let pageToken = "";
+
+  do {
+    const url = new URL(DRIVE_API);
+    url.searchParams.set("pageSize", "1000");
+    url.searchParams.set("supportsAllDrives", "true");
+    url.searchParams.set("includeItemsFromAllDrives", "true");
+    url.searchParams.set("fields", "nextPageToken,files(id,name,mimeType,modifiedTime,size,webViewLink)");
+    url.searchParams.set("q", "'" + folderId + "' in parents and trashed=false");
+    if (pageToken) {
+      url.searchParams.set("pageToken", pageToken);
+    }
+
+    const data = await parseDriveResponse<{ nextPageToken?: string; files: DriveFile[] }>(
+      await safeFetch(url, {
+        headers: {
+          Authorization: "Bearer " + accessToken,
+        },
+      }),
+    );
+    allFiles.push(...(data.files || []));
+    pageToken = data.nextPageToken || "";
+  } while (pageToken);
+
+  return allFiles;
+}
+
+export async function listDriveFolderFilesRecursiveClient(
+  accessToken: string,
+  folderId: string,
+  basePath = ""
+): Promise<DriveTreeFile[]> {
+  const children = await listDriveChildren(accessToken, folderId);
+  const results: DriveTreeFile[] = [];
+
+  for (const child of children) {
+    const childPath = basePath ? basePath + "/" + child.name : child.name;
+    if (child.mimeType === "application/vnd.google-apps.folder") {
+      results.push(...(await listDriveFolderFilesRecursiveClient(accessToken, child.id, childPath)));
+    } else {
+      results.push({ ...child, path: childPath });
+    }
+  }
+
+  return results;
+}
+
+export async function downloadDriveFileBlobClient(accessToken: string, fileId: string): Promise<Blob> {
+  const url = new URL(DRIVE_API + "/" + fileId);
+  url.searchParams.set("alt", "media");
+  url.searchParams.set("supportsAllDrives", "true");
+
+  const response = await safeFetch(url, {
+    headers: {
+      Authorization: "Bearer " + accessToken,
+    },
+  });
+
+  if (!response.ok) {
+    await parseDriveResponse<never>(response);
+  }
+
+  return response.blob();
 }
 
 export async function deleteDriveFileClient(accessToken: string, fileId: string): Promise<void> {
