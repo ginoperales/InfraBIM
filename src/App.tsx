@@ -6,6 +6,7 @@ import {
   setPersistence,
   signInWithPopup,
   signOut,
+  updateProfile,
   type User,
 } from "firebase/auth";
 import { auth, googleProvider, isFirebaseConfigured } from "./lib/firebase";
@@ -14,6 +15,7 @@ import {
   ArchiveRestore,
   Armchair,
   Bath,
+  Bell,
   BookOpen,
   Box,
   Boxes,
@@ -24,6 +26,7 @@ import {
   ChevronRight,
   CheckCircle2,
   CheckSquare,
+  CircleHelp,
   CookingPot,
   CreditCard,
   Crown,
@@ -50,6 +53,7 @@ import {
   LayoutGrid,
   Layers,
   List,
+  LogOut,
   Moon,
   PackagePlus,
   PanelsTopLeft,
@@ -551,7 +555,6 @@ const products: Product[] = [
   },
 ];
 
-const brands = ["MODASA", "SaniPro", "HydroAndes", "Weiku", "InfraWood", "AirTek", "SteelBIM", "Sika", "Tigre"];
 const footerGroups = [
   ["InfraBIM", "Inicio", "Plugin Revit", "Planes", "Familias", "Materiales", "Colecciones"],
   ["Comunidad", "Aprende BIM", "Foro", "Cursos", "Galeria", "Proyectos"],
@@ -1013,6 +1016,10 @@ export default function App() {
   const [remoteCatalog, setRemoteCatalog] = useState<CatalogProduct[]>([]);
   const [searchKind, setSearchKind] = useState<CatalogKind>(() => searchKindFromRoute(window.location.pathname) ?? "familias");
   const [searchMenuOpen, setSearchMenuOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
+  const [profileDraft, setProfileDraft] = useState({ displayName: "", photoURL: "" });
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const [catalogDraft, setCatalogDraft] = useState<CatalogDraft>(emptyCatalogDraft);
   const [gestionarSearch, setGestionarSearch] = useState("");
   const [gestionarKindFilter, setGestionarKindFilter] = useState<"todos" | CatalogKind>("todos");
@@ -1035,6 +1042,35 @@ export default function App() {
   function toggleTheme() {
     setTheme((prev) => (prev === "light" ? "dark" : "light"));
   }
+
+  useEffect(() => {
+    if (!accountMenuOpen) {
+      return undefined;
+    }
+
+    function handleOutsidePointer(event: MouseEvent | TouchEvent) {
+      const target = event.target as Node | null;
+      if (target && !accountMenuRef.current?.contains(target)) {
+        setAccountMenuOpen(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setAccountMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleOutsidePointer);
+    document.addEventListener("touchstart", handleOutsidePointer);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handleOutsidePointer);
+      document.removeEventListener("touchstart", handleOutsidePointer);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [accountMenuOpen]);
 
   // Toast notifications state
   const [toasts, setToasts] = useState<Array<{ id: string; message: string; type?: "success" | "info" | "error" }>>([]);
@@ -1142,6 +1178,7 @@ export default function App() {
   const [selectedFormat, setSelectedFormat] = useState("Todos");
   const [selectedVersion, setSelectedVersion] = useState("Todas");
   const [selectedPricing, setSelectedPricing] = useState("Todos");
+  const [selectedMaker, setSelectedMaker] = useState("");
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [mediaTab, setMediaTab] = useState<"gallery" | "3d">("gallery");
 
@@ -1469,6 +1506,28 @@ export default function App() {
     return items.filter((item) => !item.isArchived || isAdmin);
   }, [remoteCatalog, isAdmin]);
 
+  const homeProjectItems = useMemo(
+    () => catalogItems.filter((item) => item.kind === "proyectos").slice(0, 3),
+    [catalogItems],
+  );
+
+  const manufacturerFacets = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    catalogItems.forEach((item) => {
+      const maker = item.maker?.trim();
+      if (!maker) {
+        return;
+      }
+
+      counts.set(maker, (counts.get(maker) ?? 0) + 1);
+    });
+
+    return Array.from(counts, ([name, count]) => ({ name, count })).sort((first, second) =>
+      second.count - first.count || first.name.localeCompare(second.name, "es", { sensitivity: "base" }),
+    );
+  }, [catalogItems]);
+
   const [routeKind, routeSlug] = route.split("/").filter(Boolean) as [CatalogKind | undefined, string | undefined];
   const activeRouteKind = routeKind && routeKind in catalogMeta ? routeKind : undefined;
   const routeCatalogItem =
@@ -1480,8 +1539,10 @@ export default function App() {
 
   const filteredProducts = useMemo(() => {
     const matches = catalogItems.filter((product) => {
-      const matchesKind = !activeRouteKind || product.kind === activeRouteKind;
+      const isMakerResultsPage = Boolean(selectedMaker && activeRouteKind === "marcas");
+      const matchesKind = isMakerResultsPage || !activeRouteKind || product.kind === activeRouteKind;
       const matchesFilter = filter === "Todos" || product.discipline === filter || product.category === filter;
+      const matchesMaker = !selectedMaker || product.maker.trim().toLowerCase() === selectedMaker.trim().toLowerCase();
       const matchesFormat = selectedFormat === "Todos" || product.formats.includes(selectedFormat);
       const matchesVersion = selectedVersion === "Todas" || product.versions.includes(selectedVersion);
       const matchesPricing =
@@ -1507,6 +1568,7 @@ export default function App() {
       return (
         matchesKind &&
         matchesFilter &&
+        matchesMaker &&
         matchesFormat &&
         matchesVersion &&
         matchesPricing &&
@@ -1528,6 +1590,7 @@ export default function App() {
     onlyFavorites,
     query,
     selectedFormat,
+    selectedMaker,
     selectedPricing,
     selectedVersion,
     sortMode,
@@ -1540,6 +1603,30 @@ export default function App() {
     productToCatalog(products[0]);
   const isAdminPage = route === "/admin";
   const isPlansPage = route === "/planes";
+  const accountDisplayName = user?.displayName || user?.email?.split("@")[0] || "Usuario InfraBIM";
+  const accountPlanLabel = userRole === "Administrador" ? "Administrador" : userRole === "Fabricante" ? "Fabricante" : "Free";
+  const accountInitial = accountDisplayName.trim().charAt(0).toUpperCase() || "U";
+  const headerNotifications = useMemo(() => {
+    const notices: string[] = [];
+
+    if (!isFirebaseConfigured) {
+      notices.push("Firebase pendiente de configuracion");
+    }
+
+    if (catalogError) {
+      notices.push("Catalogo: " + catalogError);
+    }
+
+    if (paymentPlansError) {
+      notices.push("Planes: " + paymentPlansError);
+    }
+
+    if (dbLoading.catalog || dbLoading.plans || dbLoading.access) {
+      notices.push("Sincronizando datos de InfraBIM");
+    }
+
+    return notices;
+  }, [catalogError, dbLoading.access, dbLoading.catalog, dbLoading.plans, paymentPlansError]);
 
   function setDatabaseLoading(key: DbLoadKey, value: boolean) {
     setDbLoading((current) => ({ ...current, [key]: value }));
@@ -3402,6 +3489,28 @@ export default function App() {
     navigateTo(path);
   }
 
+  function selectManufacturerFilter(maker: string) {
+    const cleanMaker = maker.trim();
+    if (!cleanMaker) {
+      return;
+    }
+
+    setSelectedMaker(cleanMaker);
+    setFilter("Todos");
+    setQuery("");
+    setSelectedFormat("Todos");
+    setSelectedVersion("Todas");
+    setSelectedPricing("Todos");
+    setOnlyFavorites(false);
+    navigateTo("/marcas");
+    setConnectionLog("Filtro activo por fabricante: " + cleanMaker + ".");
+  }
+
+  function clearManufacturerFilter() {
+    setSelectedMaker("");
+    setConnectionLog("Filtro de fabricante removido.");
+  }
+
   function handleFooterAction(label: string) {
     if (label === "Publicar producto") {
       goToAdmin();
@@ -3428,6 +3537,244 @@ export default function App() {
     }
 
     scrollTo(map[label] ?? "inicio");
+  }
+
+  function openProfileEditor() {
+    if (!user) {
+      return;
+    }
+
+    setAccountMenuOpen(false);
+    setProfileDraft({
+      displayName: user.displayName || user.email?.split("@")[0] || "",
+      photoURL: user.photoURL || "",
+    });
+    setProfileEditorOpen(true);
+  }
+
+  async function saveProfileEditor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!user) {
+      setProfileEditorOpen(false);
+      return;
+    }
+
+    const displayName = profileDraft.displayName.trim();
+    const photoURL = profileDraft.photoURL.trim();
+
+    if (!displayName) {
+      showToast("Escribe un nombre para tu perfil.", "error");
+      return;
+    }
+
+    setBusy("profile");
+    try {
+      await updateProfile(user, {
+        displayName,
+        photoURL: photoURL || null,
+      });
+      setUser(auth?.currentUser ?? user);
+      setProfileEditorOpen(false);
+      setConnectionLog("Perfil actualizado correctamente.");
+      showToast("Perfil actualizado.", "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo actualizar el perfil.";
+      setConnectionLog(message);
+      showToast(message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function openFaqFromMenu() {
+    setAccountMenuOpen(false);
+    setSupportOpen(true);
+    setConnectionLog("Preguntas frecuentes: revisa soporte o escribenos desde el panel flotante.");
+  }
+
+  function openHeaderNotifications() {
+    if (headerNotifications.length === 0) {
+      setConnectionLog("No tienes notificaciones pendientes.");
+      showToast("Sin notificaciones pendientes.", "info");
+      return;
+    }
+
+    setConnectionLog(headerNotifications.join(" · "));
+    showToast(headerNotifications[0], "info");
+  }
+
+  function handleAccountSignOut() {
+    setAccountMenuOpen(false);
+    void disconnect();
+  }
+
+  function renderAccountAvatar(size: "small" | "large") {
+    return (
+      <span className={`account-avatar account-avatar-${size}`} aria-hidden="true">
+        {user?.photoURL ? <img alt="" src={user.photoURL} /> : accountInitial}
+      </span>
+    );
+  }
+
+  function renderProfileEditorModal() {
+    if (!profileEditorOpen || !user) {
+      return null;
+    }
+
+    return (
+      <div
+        className="profile-modal-overlay"
+        role="presentation"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) {
+            setProfileEditorOpen(false);
+          }
+        }}
+      >
+        <form className="profile-modal" onSubmit={saveProfileEditor}>
+          <div className="profile-modal-head">
+            <div>
+              <span>Cuenta InfraBIM</span>
+              <h2>Editar Perfil</h2>
+            </div>
+            <button aria-label="Cerrar editor de perfil" onClick={() => setProfileEditorOpen(false)} type="button">
+              <X aria-hidden="true" size={18} />
+            </button>
+          </div>
+
+          <div className="profile-modal-preview">
+            {profileDraft.photoURL ? (
+              <img alt="Vista previa del perfil" src={profileDraft.photoURL} />
+            ) : (
+              <span>{(profileDraft.displayName || accountInitial).trim().charAt(0).toUpperCase() || "U"}</span>
+            )}
+          </div>
+
+          <label>
+            Nombre visible
+            <input
+              onChange={(event) => setProfileDraft((draft) => ({ ...draft, displayName: event.target.value }))}
+              placeholder="Tu nombre"
+              value={profileDraft.displayName}
+            />
+          </label>
+
+          <label>
+            URL de foto
+            <input
+              onChange={(event) => setProfileDraft((draft) => ({ ...draft, photoURL: event.target.value }))}
+              placeholder="https://..."
+              value={profileDraft.photoURL}
+            />
+          </label>
+
+          <div className="profile-modal-actions">
+            <button onClick={() => setProfileEditorOpen(false)} type="button">
+              Cancelar
+            </button>
+            <button disabled={busy === "profile"} type="submit">
+              Guardar cambios
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
+  function renderDesktopActions(active?: "plans" | "admin") {
+    const notificationCount = headerNotifications.length;
+
+    return (
+      <nav className="desktop-actions account-actions" aria-label="Acciones principales">
+        <button className={active === "plans" ? "header-plan-link is-current" : "header-plan-link"} onClick={goToPlans} type="button">
+          Planes
+        </button>
+        {isAdmin && (
+          <button className={active === "admin" ? "header-admin-link is-current" : "header-admin-link"} onClick={goToAdmin} type="button">
+            Admin
+          </button>
+        )}
+        {user && (
+          <button
+            className="header-notification-button"
+            onClick={openHeaderNotifications}
+            type="button"
+            aria-label={notificationCount > 0 ? `Notificaciones: ${notificationCount}` : "Sin notificaciones"}
+            title={notificationCount > 0 ? `Notificaciones: ${notificationCount}` : "Sin notificaciones"}
+          >
+            <Bell aria-hidden="true" size={18} />
+            {notificationCount > 0 && <span>{Math.min(notificationCount, 9)}</span>}
+          </button>
+        )}
+
+        {user ? (
+          <div className="account-menu" ref={accountMenuRef}>
+            <button
+              className={accountMenuOpen ? "account-trigger is-open" : "account-trigger"}
+              onClick={() => setAccountMenuOpen((open) => !open)}
+              type="button"
+              aria-expanded={accountMenuOpen}
+              aria-haspopup="menu"
+              aria-label="Abrir menu de cuenta"
+            >
+              {renderAccountAvatar("small")}
+              <ChevronDown aria-hidden="true" size={15} />
+            </button>
+
+            {accountMenuOpen && (
+              <div className="account-dropdown" role="menu">
+                <div className="account-dropdown-head">
+                  {renderAccountAvatar("large")}
+                  <div>
+                    <strong>{accountDisplayName.toUpperCase()}</strong>
+                    <span>{accountPlanLabel}</span>
+                  </div>
+                </div>
+
+                <div className="account-dropdown-divider" />
+
+                <button className="account-dropdown-item" onClick={openProfileEditor} role="menuitem" type="button">
+                  <Edit3 aria-hidden="true" size={18} />
+                  Editar Perfil
+                </button>
+                <button className="account-dropdown-item" onClick={openFaqFromMenu} role="menuitem" type="button">
+                  <CircleHelp aria-hidden="true" size={18} />
+                  Preguntas Frecuentes
+                </button>
+                <button className="account-dropdown-item is-danger" onClick={handleAccountSignOut} role="menuitem" type="button">
+                  <LogOut aria-hidden="true" size={18} />
+                  Salir
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <button
+            className="login-button"
+            disabled={busy === "auth"}
+            onClick={connectGoogleAccount}
+            type="button"
+          >
+            <User2 aria-hidden="true" size={17} />
+            Iniciar Sesion
+          </button>
+        )}
+
+        <button
+          className="theme-button"
+          onClick={toggleTheme}
+          type="button"
+          aria-label={theme === "dark" ? "Modo Claro" : "Modo Oscuro"}
+          title={theme === "dark" ? "Modo Claro" : "Modo Oscuro"}
+        >
+          {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+        </button>
+        <button className="language-button" onClick={toggleLanguage} type="button">
+          {language}
+        </button>
+      </nav>
+    );
   }
 
   function runSearch() {
@@ -4291,6 +4638,27 @@ export default function App() {
           </select>
         </div>
 
+        <div className="advanced-filter-group">
+          <Factory size={15} />
+          <span>Fabricante:</span>
+          <select
+            value={selectedMaker}
+            onChange={(event) => {
+              setSelectedMaker(event.target.value);
+              if (event.target.value) {
+                setQuery("");
+              }
+            }}
+          >
+            <option value="">Todos los fabricantes</option>
+            {manufacturerFacets.map((maker) => (
+              <option key={maker.name} value={maker.name}>
+                {maker.name} ({maker.count})
+              </option>
+            ))}
+          </select>
+        </div>
+
         <button
           className={`filter-chip-btn ${onlyFavorites ? "is-active" : ""}`}
           onClick={() => setOnlyFavorites((prev) => !prev)}
@@ -4300,13 +4668,22 @@ export default function App() {
           Mis Favoritos ({favorites.length})
         </button>
 
-        {(selectedFormat !== "Todos" || selectedVersion !== "Todas" || selectedPricing !== "Todos" || onlyFavorites) && (
+        {selectedMaker && (
+          <button className="filter-chip-btn is-active" onClick={clearManufacturerFilter} type="button">
+            <Factory size={14} />
+            {selectedMaker}
+            <X size={14} />
+          </button>
+        )}
+
+        {(selectedFormat !== "Todos" || selectedVersion !== "Todas" || selectedPricing !== "Todos" || selectedMaker || onlyFavorites) && (
           <button
             className="filter-chip-btn"
             onClick={() => {
               setSelectedFormat("Todos");
               setSelectedVersion("Todas");
               setSelectedPricing("Todos");
+              setSelectedMaker("");
               setOnlyFavorites(false);
             }}
             type="button"
@@ -4323,22 +4700,23 @@ export default function App() {
     const kind = activeRouteKind ?? "familias";
     const meta = catalogMeta[kind];
     const PageIcon = meta.Icon;
+    const isMakerResultsPage = Boolean(selectedMaker && kind === "marcas");
 
     return (
       <section className="families-page catalog-route-page" id={kind}>
-        <div className="breadcrumb">Inicio / {meta.label}</div>
+        <div className="breadcrumb">Inicio / {meta.label}{selectedMaker ? " / " + selectedMaker : ""}</div>
         <div className="list-heading">
           <div>
             <span className="route-eyebrow">
               <PageIcon aria-hidden="true" size={18} />
-              {meta.singular}
+              {isMakerResultsPage ? "Fabricante" : meta.singular}
             </span>
             <h2>
               {dbLoading.catalog
                 ? renderSkeletonLine("skeleton-count")
                 : `${filteredProducts.length.toLocaleString("es-PE")} resultados`}
             </h2>
-            <p>{meta.description}</p>
+            <p>{selectedMaker ? `Productos publicados por ${selectedMaker}.` : meta.description}</p>
           </div>
           <button onClick={toggleSortMode} type="button">
             {sortMode === "recent" ? "Recientes" : "Populares"}
@@ -4353,9 +4731,9 @@ export default function App() {
             Recurso
             <ChevronDown aria-hidden="true" size={16} />
           </button>
-          <button onClick={() => navigateTo("/marcas")} type="button">
+          <button className={selectedMaker ? "is-active" : ""} onClick={() => navigateTo("/marcas")} type="button">
             <Factory aria-hidden="true" size={16} />
-            Fabricantes
+            {selectedMaker || "Fabricantes"}
             <ChevronDown aria-hidden="true" size={16} />
           </button>
           <button onClick={toggleSortMode} type="button">
@@ -6276,35 +6654,7 @@ export default function App() {
                 <Search aria-hidden="true" size={18} />
               </button>
             </form>
-
-            <nav className="desktop-actions" aria-label="Acciones principales">
-              <button onClick={goToPlans} type="button">
-                Planes
-              </button>
-              <button className="is-current" onClick={goToAdmin} type="button">
-                Admin
-              </button>
-              <button
-                className="login-button"
-                disabled={busy === "auth"}
-                onClick={user ? disconnect : connectGoogleAccount}
-                type="button"
-              >
-                {user ? "Salir" : "Ingresar"}
-              </button>
-              <button
-                className="theme-button"
-                onClick={toggleTheme}
-                type="button"
-                aria-label={theme === "dark" ? "Modo Claro" : "Modo Oscuro"}
-                title={theme === "dark" ? "Modo Claro" : "Modo Oscuro"}
-              >
-                {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
-              </button>
-              <button className="language-button" onClick={toggleLanguage} type="button">
-                {language}
-              </button>
-            </nav>
+            {renderDesktopActions("admin")}
           </div>
 
           <nav className="secondary-nav" aria-label="Navegacion del catalogo">
@@ -6342,6 +6692,8 @@ export default function App() {
             </button>
           </div>
         </footer>
+
+        {renderProfileEditorModal()}
 
         {supportOpen && (
           <aside className="support-panel" aria-live="polite">
@@ -6400,37 +6752,7 @@ export default function App() {
                 <Search aria-hidden="true" size={18} />
               </button>
             </form>
-
-            <nav className="desktop-actions" aria-label="Acciones principales">
-              <button className="is-current" onClick={goToPlans} type="button">
-                Planes
-              </button>
-              {isAdmin && (
-                <button onClick={goToAdmin} type="button">
-                  Admin
-                </button>
-              )}
-              <button
-                className="login-button"
-                disabled={busy === "auth"}
-                onClick={user ? disconnect : connectGoogleAccount}
-                type="button"
-              >
-                {user ? "Salir" : "Iniciar Sesion"}
-              </button>
-              <button
-                className="theme-button"
-                onClick={toggleTheme}
-                type="button"
-                aria-label={theme === "dark" ? "Modo Claro" : "Modo Oscuro"}
-                title={theme === "dark" ? "Modo Claro" : "Modo Oscuro"}
-              >
-                {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
-              </button>
-              <button className="language-button" onClick={toggleLanguage} type="button">
-                {language}
-              </button>
-            </nav>
+            {renderDesktopActions("plans")}
           </div>
 
           <nav className="secondary-nav" aria-label="Navegacion del catalogo">
@@ -6468,6 +6790,8 @@ export default function App() {
             </button>
           </div>
         </footer>
+
+        {renderProfileEditorModal()}
 
         {supportOpen && (
           <aside className="support-panel" aria-live="polite">
@@ -6955,37 +7279,7 @@ export default function App() {
                 <Search aria-hidden="true" size={18} />
               </button>
             </form>
-
-            <nav className="desktop-actions" aria-label="Acciones principales">
-              <button onClick={goToPlans} type="button">
-                Planes
-              </button>
-              {isAdmin && (
-                <button onClick={goToAdmin} type="button">
-                  Admin
-                </button>
-              )}
-              <button
-                className="login-button"
-                disabled={busy === "auth"}
-                onClick={user ? disconnect : connectGoogleAccount}
-                type="button"
-              >
-                {user ? "Salir" : "Iniciar Sesion"}
-              </button>
-              <button
-                className="theme-button"
-                onClick={toggleTheme}
-                type="button"
-                aria-label={theme === "dark" ? "Modo Claro" : "Modo Oscuro"}
-                title={theme === "dark" ? "Modo Claro" : "Modo Oscuro"}
-              >
-                {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
-              </button>
-              <button className="language-button" onClick={toggleLanguage} type="button">
-                {language}
-              </button>
-            </nav>
+            {renderDesktopActions()}
           </div>
 
           <nav className="secondary-nav" aria-label="Navegacion del catalogo">
@@ -7029,6 +7323,8 @@ export default function App() {
           </div>
         </footer>
 
+        {renderProfileEditorModal()}
+
         {supportOpen && (
           <aside className="support-panel" aria-live="polite">
             <strong>Soporte InfraBIM</strong>
@@ -7071,37 +7367,7 @@ export default function App() {
               Plugin para Revit
             </button>
           </nav>
-
-          <nav className="desktop-actions" aria-label="Acciones principales">
-            <button onClick={goToPlans} type="button">
-              Planes
-            </button>
-            {isAdmin && (
-              <button onClick={goToAdmin} type="button">
-                Admin
-              </button>
-            )}
-            <button
-              className="login-button"
-              disabled={busy === "auth"}
-              onClick={user ? disconnect : connectGoogleAccount}
-              type="button"
-            >
-              {user ? "Salir" : "Iniciar Sesion"}
-            </button>
-            <button
-              className="theme-button"
-              onClick={toggleTheme}
-              type="button"
-              aria-label={theme === "dark" ? "Modo Claro" : "Modo Oscuro"}
-              title={theme === "dark" ? "Modo Claro" : "Modo Oscuro"}
-            >
-              {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
-            </button>
-            <button className="language-button" onClick={toggleLanguage} type="button">
-              {language}
-            </button>
-          </nav>
+          {renderDesktopActions()}
         </div>
       </header>
 
@@ -7208,11 +7474,32 @@ export default function App() {
             <p>Marcas con catalogos BIM, fichas tecnicas y analitica comercial.</p>
           </div>
         </div>
-        <div className="brand-row">
-          {brands.map((brand) => (
-            <span key={brand}>{brand}</span>
-          ))}
-        </div>
+        {dbLoading.catalog ? (
+          <div className="brand-row brand-row-loading">
+            {Array.from({ length: 6 }, (_, index) => (
+              <span className="brand-skeleton" key={index} />
+            ))}
+          </div>
+        ) : manufacturerFacets.length > 0 ? (
+          <div className="brand-row">
+            {manufacturerFacets.slice(0, 12).map((maker) => (
+              <button
+                className={selectedMaker === maker.name ? "is-active" : ""}
+                key={maker.name}
+                onClick={() => selectManufacturerFilter(maker.name)}
+                type="button"
+                aria-label={"Ver productos de " + maker.name}
+              >
+                <strong>{maker.name}</strong>
+                <small>{maker.count} {maker.count === 1 ? "producto" : "productos"}</small>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="brand-empty">
+            Publica recursos reales con el campo fabricante para activar estos filtros.
+          </div>
+        )}
       </section>
 
       <section className="module-showcase" id="materiales">
@@ -7221,16 +7508,23 @@ export default function App() {
             <h2>Materiales</h2>
             <p>Acabados, fichas tecnicas y parametros listos para presupuestos.</p>
           </div>
-          <button onClick={() => setFilter("Arquitectura")} type="button">
+          <button onClick={() => navigateTo("/materiales")} type="button">
             Ver materiales
           </button>
         </div>
-        <div className="module-card-grid">
-          {["Concreto aparente", "Melamina nogal", "Vidrio templado", "Acero galvanizado"].map((item) => (
-            <button key={item} onClick={() => setCommonSearch(item)} type="button">
-              <span />
-              <strong>{item}</strong>
-              <small>Material BIM con ficha tecnica</small>
+        <div className="module-card-grid materials-grid">
+          {[
+            { name: "Concreto aparente", detail: "Textura mineral para muros, losas y elementos vistos.", visual: "concrete", Icon: Building2 },
+            { name: "Melamina nogal", detail: "Acabado madera para mobiliario y carpinteria BIM.", visual: "wood", Icon: Trees },
+            { name: "Vidrio templado", detail: "Superficie transparente para mamparas, puertas y fachadas.", visual: "glass", Icon: PanelsTopLeft },
+            { name: "Acero galvanizado", detail: "Metal protegido para estructuras, barandas y soportes.", visual: "steel", Icon: Wrench },
+          ].map(({ name, detail, visual, Icon }) => (
+            <button key={name} onClick={() => setCommonSearch(name)} type="button">
+              <span className={"material-real-icon material-" + visual} aria-hidden="true">
+                <Icon size={22} />
+              </span>
+              <strong>{name}</strong>
+              <small>{detail}</small>
             </button>
           ))}
         </div>
@@ -7265,170 +7559,35 @@ export default function App() {
         <div className="section-title">
           <div>
             <h2>Proyectos</h2>
-            <p>Organiza modelos, documentos y objetos usados por cada expediente BIM.</p>
+            <p>Expedientes BIM publicados desde la base real de InfraBIM.</p>
           </div>
-          <button onClick={user ? goToAdmin : connectGoogleAccount} type="button">
-            Gestionar
+          <button onClick={() => navigateTo("/proyectos")} type="button">
+            Ver proyectos
           </button>
         </div>
-        <div className="project-grid">
-          {["Hospital Pucallpa", "Colegio Yarinacocha", "Edificio multifamiliar"].map((project) => (
-            <button key={project} onClick={user ? goToAdmin : connectGoogleAccount} type="button">
-              <strong>{project}</strong>
-              <small>ARQ.rvt / EST.rvt / MEP.rvt</small>
-              <span>128 objetos vinculados</span>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="module-showcase" id="galeria">
-        <div className="section-title">
-          <div>
-            <h2>Galeria</h2>
-            <p>Previsualizaciones, escenas AR y ejemplos de uso para fabricantes.</p>
-          </div>
-          <button onClick={() => scrollTo("plugin")} type="button">
-            Ver plugin
-          </button>
-        </div>
-        <div className="gallery-strip">
-          <img src="/bim-hero.png" alt="Escena BIM con objetos de arquitectura" />
-          <div>
-            <h3>Vista BIM enriquecida</h3>
-            <p>Combina catalogo, visor 3D, descarga, Drive y analitica en una experiencia unificada.</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="families-page">
-        <div className="breadcrumb">Inicio / Familias</div>
-        <div className="list-heading">
-          <h2>{filteredProducts.length.toLocaleString("es-PE")} resultados</h2>
-          <button onClick={toggleSortMode} type="button">
-            {sortMode === "recent" ? "Recientes" : "Populares"}
-          </button>
-        </div>
-
-        <div className="filter-row">
-          <span>Filtrar por</span>
-          {categoryFilters.map((item) => (
-            <button className={filter === item ? "is-active" : ""} key={item} onClick={() => setFilter(item)} type="button">
-              {item}
-            </button>
-          ))}
-        </div>
-
         {dbLoading.catalog ? (
-          <div className="family-grid">{renderCatalogCardSkeletons(8)}</div>
-        ) : filteredProducts.length > 0 ? (
-          <div className="family-grid">
-            {filteredProducts.map((product) => (
-              <button className="library-card" key={product.id} onClick={() => selectProduct(product.id)} type="button">
-                <span className="fresh-badge">{product.feature}</span>
-                {product.isPremium && <span className="crown-badge" aria-label="Premium" />}
-                {renderCatalogVisual(product, "library-visual")}
-                <strong>{product.name}</strong>
-                <small>{product.maker}</small>
-                <span className="card-footer">
-                  <i>{product.downloads}</i>
-                  <b>Descargar</b>
-                </span>
-              </button>
-            ))}
+          <div className="project-grid">{renderCatalogCardSkeletons(3, "library")}</div>
+        ) : homeProjectItems.length > 0 ? (
+          <div className="project-grid">
+            {homeProjectItems.map((project) => {
+              const linkedCount = (project.attachedFiles?.length || 0) + (project.images?.length || 0) + (project.glbUrl ? 1 : 0);
+              return (
+                <button key={project.id} onClick={() => navigateTo(project.route)} type="button">
+                  <strong>{project.name}</strong>
+                  <small>{[project.maker, project.category].filter(Boolean).join(" / ") || "Proyecto BIM"}</small>
+                  <span>{linkedCount > 0 ? linkedCount + " archivo(s) vinculados" : "Publicado en Firestore"}</span>
+                </button>
+              );
+            })}
           </div>
         ) : (
           renderDatabaseMessage(
-            "Sin resultados reales",
-            catalogError || "No hay recursos publicados para esta busqueda en Firestore.",
-            () => void refreshCatalogItems(),
+            "Sin proyectos reales publicados",
+            "Cuando publiques expedientes con tipo Proyecto desde el panel, apareceran aqui.",
+            user ? goToAdmin : connectGoogleAccount,
           )
         )}
       </section>
-
-      {dbLoading.catalog ? (
-        <section className="detail-section" id="detalle" aria-busy="true">
-          <div className="detail-visual detail-skeleton-visual">
-            <span className="skeleton-block" />
-          </div>
-          <div className="detail-copy">
-            {renderSkeletonLine("skeleton-chip")}
-            <div className="detail-title">
-              <div>
-                {renderSkeletonLine("skeleton-route")}
-                {renderSkeletonLine("skeleton-detail-title")}
-                {renderSkeletonLine("skeleton-short")}
-              </div>
-              {renderSkeletonLine("skeleton-button")}
-            </div>
-            <div className="meta-pills skeleton-meta">
-              {renderSkeletonLine("skeleton-chip")}
-              {renderSkeletonLine("skeleton-chip")}
-              {renderSkeletonLine("skeleton-chip")}
-            </div>
-            {renderSkeletonLine("skeleton-title")}
-            {renderSkeletonLine("skeleton-paragraph")}
-            {renderSkeletonLine("skeleton-paragraph short")}
-          </div>
-        </section>
-      ) : catalogItems.length > 0 ? (
-        <>
-          <section className="detail-section" id="detalle">
-            <div className="detail-visual">
-              <span className="crown-badge large" aria-label="Premium" />
-              {renderCatalogVisual(selectedProduct, "library-visual detail")}
-            </div>
-
-            <div className="detail-copy">
-              <span className="fresh-badge detail-badge">{selectedProduct.feature}</span>
-              <div className="detail-title">
-                <div>
-                  <p>Inicio / Familias / {selectedProduct.name}</p>
-                  <h2>{selectedProduct.name}</h2>
-                  <span>{selectedProduct.isPremium ? "Premium" : "Gratis"}</span>
-                </div>
-                <button disabled={busy === "drive"} onClick={uploadSelectedToDrive} type="button">
-                  Descargar
-                </button>
-              </div>
-
-              <div className="meta-pills">
-                <span>{selectedProduct.maker}</span>
-                <span>{selectedProduct.category}</span>
-                <span>{selectedProduct.formats.join(" / ")}</span>
-              </div>
-
-              <h3>Descripcion</h3>
-              <p>{selectedProduct.description}</p>
-
-              <h3>Informacion tecnica</h3>
-              <div className="technical-grid">
-                {selectedProduct.specs.map((spec) => (
-                  <span key={spec}>{spec}</span>
-                ))}
-              </div>
-
-              <div className="detail-actions">
-                <button disabled={busy === "firestore"} onClick={publishSelected} type="button">
-                  Publicar en Firestore
-                </button>
-                <button disabled={busy === "favorite"} onClick={saveSelectedFavorite} type="button">
-                  Guardar favorito
-                </button>
-              </div>
-            </div>
-          </section>
-          {renderSimilarProducts(selectedProduct)}
-        </>
-      ) : (
-        <section className="families-page">
-          {renderDatabaseMessage(
-            "Detalle pendiente",
-            catalogError || "Publica un recurso en Firestore para mostrar su detalle real.",
-            () => void refreshCatalogItems(),
-          )}
-        </section>
-      )}
 
       <section className="plugin-section" id="plugin">
         <div className="plugin-copy">
@@ -7447,41 +7606,6 @@ export default function App() {
           </div>
         </div>
         <img src="/bim-hero.png" alt="Visual BIM de interiores y objetos listos para Revit" />
-      </section>
-
-      <section className="plans-section" id="planes">
-        <div className="section-title">
-          <div>
-            <h2>Planes InfraBIM</h2>
-            <p>Activa capacidades por usuario, creador, fabricante o empresa.</p>
-          </div>
-          <button onClick={user ? goToAdmin : connectGoogleAccount} type="button">
-            {user ? "Abrir panel" : "Ingresar"}
-          </button>
-        </div>
-        <div className="plans-grid">
-          {[
-            ["Free", "Explorar y descargar contenido gratuito", "Biblioteca, favoritos y visor."],
-            ["BIM Pro", "IA, premium y herramientas BIM", "Descargas Pro, colecciones y Drive."],
-            ["Fabricante", "Catalogo comercial y analitica", "Productos, leads y paginas de marca."],
-          ].map(([title, subtitle, detail]) => (
-            <button key={title} onClick={user ? goToAdmin : connectGoogleAccount} type="button">
-              <strong>{title}</strong>
-              <span>{subtitle}</span>
-              <small>{detail}</small>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="pre-footer">
-        <div>
-          <h2>Con InfraBIM Plugin accedes a una biblioteca completa de familias BIM.</h2>
-          <button onClick={() => scrollTo("plugin")} type="button">
-            {"Descarga gratuita ->"}
-          </button>
-        </div>
-        <img src="/bim-hero.png" alt="Biblioteca BIM para proyectos de arquitectura e ingenieria" />
       </section>
 
       <footer className="site-footer">
@@ -7511,6 +7635,8 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+        {renderProfileEditorModal()}
 
       {supportOpen && (
         <aside className="support-panel" aria-live="polite">
